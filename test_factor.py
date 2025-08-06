@@ -14,12 +14,18 @@ warnings.filterwarnings("ignore")
 
 
 # 离群值处理
-def filter_extreme_MAD(series, n):
-    median = series.median()
-    new_median = ((series - median).abs()).median()
-    if new_median == 0:
-        new_median = np.inf
-    return series.clip(median - n * new_median, median + n * new_median)
+def mad(df, n=3 * 1.4826):
+    
+    # MAD:中位数去极值
+    def filter_extreme_MAD(series,n): 
+        median = series.median()
+        new_median = ((series - median).abs()).median()
+        return series.clip(median - n*new_median,median + n*new_median)
+
+    # 离群值处理
+    df = df.apply(lambda x :filter_extreme_MAD(x,n), axis=1)
+
+    return df
 
 
 # 中性化处理
@@ -95,6 +101,9 @@ if __name__ == "__main__":
     # 数据目录
     DATA_DIR = Path("./alpha_local/database")
 
+    # 读取nn原始数据
+    raw_data = pd.read_pickle(DATA_DIR / "20140101_20221214_全A_日级别.pkl")
+    
     # 市值数据
     market_cap = pd.DataFrame(
         pd.read_pickle(DATA_DIR / "market_cap.pkl"), columns=["market_cap"]
@@ -130,7 +139,7 @@ if __name__ == "__main__":
     ).dropna(axis=1, how="all")
 
     # 离群值处理
-    factor_alpha = factor_alpha.apply(lambda x: filter_extreme_MAD(x, 3), axis=1)
+    factor_alpha = mad(factor_alpha)
 
     # 标准化处理
     factor_alpha = factor_alpha.sub(factor_alpha.mean(axis=1), axis=0).div(
@@ -148,4 +157,4 @@ if __name__ == "__main__":
     ic_summary = pd.concat([ic_summary, ic_ir(Result, "alpha_001")], axis=0)
 
 
-    print()
+    print(ic_summary)
