@@ -15,17 +15,37 @@ warnings.filterwarnings("ignore")
 
 # 离群值处理
 def mad(df, n=3 * 1.4826):
-    
+
     # MAD:中位数去极值
-    def filter_extreme_MAD(series,n): 
+    def filter_extreme_MAD(series, n):
         median = series.median()
         new_median = ((series - median).abs()).median()
-        return series.clip(median - n*new_median,median + n*new_median)
+        return series.clip(median - n * new_median, median + n * new_median)
 
     # 离群值处理
-    df = df.apply(lambda x :filter_extreme_MAD(x,n), axis=1)
+    df = df.apply(lambda x: filter_extreme_MAD(x, n), axis=1)
 
     return df
+
+
+# 离群值处理
+def mad_vectorized(df, n=3 * 1.4826):
+
+    # 计算每行的中位数
+    median = df.median(axis=1)
+    # 计算每行的MAD
+    mad_values = (df.sub(median, axis=0).abs()).median(axis=1)
+    # 计算上下界
+    lower_bound = median - n * mad_values
+    upper_bound = median + n * mad_values
+
+    return df.clip(lower_bound, upper_bound, axis=0)
+
+
+# 标准化处理
+def standardize(df):
+    df_standardize = df.sub(df.mean(axis=1), axis=0).div(df.std(axis=1), axis=0)
+    return df_standardize
 
 
 # 中性化处理
@@ -35,6 +55,7 @@ def neutralization(factor, market_cap, industry_exposure):
         [factor.stack(), market_cap, industry_exposure], axis=1
     ).dropna()
     datetime_list = sorted(list(set(market_cap.index.get_level_values(0))))
+    # datetime_list = datetime_list[:3]
     for i in datetime_list:
         try:
             factor_ols_temp = factor_ols.loc[i]  # 截面数据做回归
@@ -51,6 +72,46 @@ def neutralization(factor, market_cap, industry_exposure):
             factor_resid = pd.concat([factor_resid, pd.DataFrame()], axis=1)
     factor_resid = factor_resid.T
     factor_resid.index = pd.to_datetime(factor_resid.index)
+    return factor_resid
+
+
+# 向量化中性化处理
+def neutralization_vectorized(factor, market_cap, industry_exposure):
+    factor_ols = pd.concat(
+        [factor.stack(), market_cap, industry_exposure], axis=1
+    ).dropna()
+    factor_ols.columns = ["factor"] + list(factor_ols.columns[1:])
+
+    # 只取前三天的数据进行测试
+    # all_dates = sorted(factor_ols.index.get_level_values(0).unique())
+    # first_three_dates = all_dates[:3]
+    # factor_ols = factor_ols.loc[first_three_dates]
+
+    # print(f"测试日期: {first_three_dates}")
+    # print(f"测试数据形状: {factor_ols.shape}")
+
+    def neutralize_cross_section(group):
+
+        # breakpoint()
+        current_date = group.index.get_level_values(0)[0]
+        current_stocks = group.index.get_level_values(1)
+
+        print(f"日期: {current_date}, 股票数量: {len(current_stocks)}")
+        print(f"股票代码示例: {list(current_stocks[:5])}")
+
+        try:
+            y = group["factor"]
+            x = group.iloc[:, 1:]
+            model = sm.OLS(y, x, hasconst=False, missing="drop").fit()
+            return pd.Series(model.resid)
+        except:
+            return pd.Series(index=current_stocks)
+
+    factor_resid = factor_ols.groupby(level=0).apply(neutralize_cross_section)
+    factor_resid = factor_resid.reset_index(level=0, drop=True)
+    factor_resid = factor_resid.unstack(level=0).T
+    factor_resid.index = pd.to_datetime(factor_resid.index)
+
     return factor_resid
 
 
@@ -103,7 +164,7 @@ if __name__ == "__main__":
 
     # 读取nn原始数据
     raw_data = pd.read_pickle(DATA_DIR / "20140101_20221214_全A_日级别.pkl")
-    
+
     # 市值数据
     market_cap = pd.DataFrame(
         pd.read_pickle(DATA_DIR / "market_cap.pkl"), columns=["market_cap"]
@@ -139,22 +200,23 @@ if __name__ == "__main__":
     ).dropna(axis=1, how="all")
 
     # 离群值处理
-    factor_alpha = mad(factor_alpha)
+    factor_alpha = mad_vectorized(factor_alpha)
 
     # 标准化处理
-    factor_alpha = factor_alpha.sub(factor_alpha.mean(axis=1), axis=0).div(
-        factor_alpha.std(axis=1), axis=0
-    )
+    factor_alpha = standardize(factor_alpha)
 
     # 中性化处理
-    factor_alpha = neutralization(factor_alpha,market_cap,industry_exposure)
+    factor_alpha1 = neutralization(factor_alpha, market_cap, industry_exposure)
+    factor_alpha2 = neutralization_vectorized(
+        factor_alpha, market_cap, industry_exposure
+    )
+    print(factor_alpha1.equals(factor_alpha2))
 
     # 单因子检验
-    Result = Factor_Return_N_IC(factor_alpha.stack(),change_day,close)
+    Result = Factor_Return_N_IC(factor_alpha.stack(), change_day, close)
 
     # ICIR
     ic_summary = pd.DataFrame()
     ic_summary = pd.concat([ic_summary, ic_ir(Result, "alpha_001")], axis=0)
-
 
     print(ic_summary)
