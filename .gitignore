@@ -1,0 +1,13 @@
+echo "__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.pytest_cache/
+.coverage
+.env
+*.pkl
+database/
+*.ipynb_checkpoints/
+.DS_Store
