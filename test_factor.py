@@ -4,6 +4,13 @@ import pandas as pd
 from scipy import stats
 import statsmodels.api as sm
 from pathlib import Path
+import os
+from rqdatac import *
+from rqfactor import *
+from rqfactor import Factor
+from rqfactor.extension import *
+init('13522652015', '123456')
+import rqdatac
 
 from tqdm import *
 import KDCJ
@@ -11,6 +18,29 @@ import KDCJ
 import warnings
 
 warnings.filterwarnings("ignore")
+
+
+# 动态券池
+def INDEX_FIX(start_date, end_date, index_item):
+    """
+    :param start_date: 开始日 -> str
+    :param end_date: 结束日 -> str
+    :param index_item: 指数代码 -> str
+    :return index_fix: 动态因子值 -> unstack
+    """
+
+    index_fix = pd.DataFrame(
+        {
+            k: dict.fromkeys(v, True)
+            for k, v in index_components(
+                index_item, start_date=start_date, end_date=end_date
+            ).items()
+        }
+    ).T
+
+    index_fix.fillna(False, inplace=True)
+
+    return index_fix
 
 
 # 离群值处理
@@ -77,27 +107,15 @@ def neutralization(factor, market_cap, industry_exposure):
 
 # 向量化中性化处理
 def neutralization_vectorized(factor, market_cap, industry_exposure):
+
+    # 1. 合并因子值和市值/行业暴露度
     factor_ols = pd.concat(
         [factor.stack(), market_cap, industry_exposure], axis=1
     ).dropna()
     factor_ols.columns = ["factor"] + list(factor_ols.columns[1:])
 
-    # 只取前三天的数据进行测试
-    # all_dates = sorted(factor_ols.index.get_level_values(0).unique())
-    # first_three_dates = all_dates[:3]
-    # factor_ols = factor_ols.loc[first_three_dates]
-
-    # print(f"测试日期: {first_three_dates}")
-    # print(f"测试数据形状: {factor_ols.shape}")
-
+    # 2. 截面回归
     def neutralize_cross_section(group):
-
-        # breakpoint()
-        current_date = group.index.get_level_values(0)[0]
-        current_stocks = group.index.get_level_values(1)
-
-        print(f"日期: {current_date}, 股票数量: {len(current_stocks)}")
-        print(f"股票代码示例: {list(current_stocks[:5])}")
 
         try:
             y = group["factor"]
@@ -105,7 +123,7 @@ def neutralization_vectorized(factor, market_cap, industry_exposure):
             model = sm.OLS(y, x, hasconst=False, missing="drop").fit()
             return pd.Series(model.resid)
         except:
-            return pd.Series(index=current_stocks)
+            return pd.Series(dtype=float)
 
     factor_resid = factor_ols.groupby(level=0).apply(neutralize_cross_section)
     factor_resid = factor_resid.reset_index(level=0, drop=True)
@@ -151,6 +169,67 @@ def ic_ir(x, name):
     return pd.DataFrame([IC])
 
 
+# 单因子检验
+def calc_ic(df, n, index_item, name="", Rank_IC=True):
+
+    # 基础数据获取
+    order_book_ids = df.columns.tolist()
+    datetime_period = df.index
+    start = datetime_period.min().strftime("%F")
+    end = datetime_period.max().strftime("%F")
+
+    # 提取预存储数据
+    try:
+        # 开盘价
+        open = pd.read_pickle(f"alpha_local/database/open_{index_item}_{start}_{end}.pkl")
+    except:
+        # 新建预存储文档
+        os.makedirs("alpha_local/database", exist_ok=True)
+        # 拿一个完整的券池表格，防止有些股票在某些日期没有数据，导致缓存数据不全，影响其他因子计算
+        index_fix = INDEX_FIX(start, end, index_item)
+        order_book_ids = index_fix.columns.tolist()
+        datetime_period = index_fix.index.tolist()
+        # 获取开盘价
+        open = get_price(
+            order_book_ids,
+            start_date=start,
+            end_date=end,
+            frequency="1d",
+            fields="open",
+        ).open.unstack("order_book_id")
+        # 存储
+        open.to_pickle(f"alpha_local/database/open_{index_item}_{start}_{end}.pkl")
+
+    # 未来一段收益股票的累计收益率计算
+    return_n = open.pct_change(n).shift(-n - 1)
+
+    # 计算IC
+    if Rank_IC == True:
+        result = df.corrwith(return_n, axis=1, method="spearman").dropna(how="all")
+    else:
+        result = df.corrwith(return_n, axis=1, method="pearson").dropna(how="all")
+
+    # t检验 单样本
+    t_stat, _ = stats.ttest_1samp(result, 0)
+
+    # 因子报告
+    report = {
+        "name": name,
+        "IC mean": round(result.mean(), 2),
+        "IC std": round(result.std(), 2),
+        "IR": round(result.mean() / result.std(), 2),
+        "IC>0": round(len(result[result > 0].dropna()) / len(result), 2),
+        "ABS_IC>2%": round(len(result[abs(result) > 0.02].dropna()) / len(result), 2),
+        "t_stat": round(t_stat, 2),
+    }
+
+    print(report)
+
+    report = pd.DataFrame([report])
+
+    return result, report
+
+
 if __name__ == "__main__":
 
     # 注意：原始数据的起始日期是2014-01-01，结束日期为2022-12-14
@@ -158,9 +237,12 @@ if __name__ == "__main__":
     start_date = "2020-01-02"
     end_date = "2022-01-01"
     change_day = 5
+    index_item = "000985.XSHG"
 
-    # 数据目录
-    DATA_DIR = Path("./alpha_local/database")
+    # 数据目录 - 修复路径问题
+    # 获取当前脚本的目录
+    script_dir = Path(__file__).parent
+    DATA_DIR = script_dir / "database"
 
     # 读取nn原始数据
     raw_data = pd.read_pickle(DATA_DIR / "20140101_20221214_全A_日级别.pkl")
@@ -206,17 +288,14 @@ if __name__ == "__main__":
     factor_alpha = standardize(factor_alpha)
 
     # 中性化处理
-    factor_alpha1 = neutralization(factor_alpha, market_cap, industry_exposure)
-    factor_alpha2 = neutralization_vectorized(
+    factor_alpha = neutralization_vectorized(
         factor_alpha, market_cap, industry_exposure
     )
-    print(factor_alpha1.equals(factor_alpha2))
 
     # 单因子检验
-    Result = Factor_Return_N_IC(factor_alpha.stack(), change_day, close)
+    # Result = Factor_Return_N_IC(factor_alpha.stack(), change_day, close)
+    # ic_summary = pd.DataFrame()
+    # ic_summary = pd.concat([ic_summary, ic_ir(Result, "alpha_001")], axis=0)
 
-    # ICIR
-    ic_summary = pd.DataFrame()
-    ic_summary = pd.concat([ic_summary, ic_ir(Result, "alpha_001")], axis=0)
+    ic, performance = calc_ic(factor_alpha, change_day,index_item)
 
-    print(ic_summary)
