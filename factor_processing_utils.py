@@ -14,7 +14,7 @@ init("13522652015", "123456")
 import rqdatac
 
 from tqdm import *
-import KDCJ
+
 import matplotlib.pyplot as plt
 
 plt.rcParams["font.sans-serif"] = [
@@ -54,6 +54,7 @@ def INDEX_FIX(start_date, end_date, index_item):
     return index_fix
 
 
+# 新股过滤
 def get_new_stock_filter(stock_list, datetime_period, newly_listed_threshold=252):
     """
     :param stock_list: 股票队列 -> list
@@ -97,10 +98,7 @@ def get_new_stock_filter(stock_list, datetime_period, newly_listed_threshold=252
     return newly_listed_window
 
 
-# new_stock_filter = get_new_stock_filter(stock_list,date_list, newly_listed_threshold = 252)
-
-
-# 1.2 st过滤（风险警示标的默认不进行研究）
+# st过滤（风险警示标的默认不进行研究）
 def get_st_filter(stock_list, datetime_period):
     """
     :param stock_list: 股票池 -> list
@@ -117,10 +115,7 @@ def get_st_filter(stock_list, datetime_period):
     return st_filter
 
 
-# st_filter = get_st_filter(stock_list,date_list)
-
-
-# 1.3 停牌过滤 （无法交易）
+# 停牌过滤 （无法交易）
 def get_suspended_filter(stock_list, date_list):
     """
     :param stock_list: 股票池 -> list
@@ -137,10 +132,7 @@ def get_suspended_filter(stock_list, date_list):
     return suspended_filter
 
 
-# suspended_filter = get_suspended_filter(stock_list,date_list)
-
-
-# 1.4 涨停过滤 （开盘无法买入）
+# 涨停过滤 （开盘无法买入）
 def get_limit_up_filter(stock_list, date_list):
     """
     :param stock_list: 股票池 -> list
@@ -246,7 +238,7 @@ def get_industry_exposure(order_book_ids, datetime_period, industry_type="zx"):
     return df.stack()
 
 
-# 向量化中性化处理
+# 行业市值中性化
 def neutralization_vectorized(
     factor,
     order_book_ids,
@@ -357,6 +349,7 @@ def calc_ic(df, n, index_item, name="", Rank_IC=True):
     # 因子报告
     report = {
         "name": name,
+        "change_day": n,
         "IC mean": round(result.mean(), 4),
         "IC std": round(result.std(), 4),
         "IR": round(result.mean() / result.std(), 4),
@@ -372,6 +365,7 @@ def calc_ic(df, n, index_item, name="", Rank_IC=True):
     return result, report
 
 
+# 分组回测
 def group_g(df, n, g, index_item, name="", rebalance=False):
     """
     :param df: 因子值 -> unstack
@@ -532,10 +526,10 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
     group_annual_ret["group"] = list(range(1, g + 1))
     corr_value = round(group_annual_ret.corr(method="spearman").iloc[0, 1], 4)
     group_annual_ret.annual_ret.plot(
-        kind="bar", figsize=(5, 3), title=f"{name}_分层超额年化收益_单调性{corr_value}"
+        kind="bar", figsize=(10, 5), title=f"{name}_分层超额年化收益_单调性{corr_value}"
     )
 
-    group_return.plot(figsize=(5, 3), title=f"{name}_分层净值表现")
+    group_return.plot(figsize=(10, 5), title=f"{name}_分层净值表现")
 
     yby_performance = (
         group_return.pct_change()
@@ -547,7 +541,7 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
     yby_performance = yby_performance.replace(0, np.nan).dropna(how="all")
     yby_performance.plot(
         kind="bar",
-        figsize=(5, 3),
+        figsize=(10, 5),
         title=f"{name}_逐年分层年化收益",
         color=[
             "powderblue",
@@ -561,60 +555,110 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
     return group_return, turnover_ratio
 
 
-if __name__ == "__main__":
+# # 数据清洗封装函数
+# def data_clean(factor, stock_universe, index_item):
 
-    start_date = "2022-01-01"
-    end_date = "2025-07-01"
-    index_item = "000852.XSHG"
-    change_day = 20
+#     stock_list = stock_universe.columns.tolist()
+#     date_list = stock_universe.index.tolist()
+#     start_date = date_list[0].strftime("%F")
+#     end_date = date_list[-1].strftime("%F")
 
-    stock_universe = INDEX_FIX(start_date, end_date, index_item)
-    stock_list = stock_universe.columns.tolist()
-    date_list = stock_universe.index.tolist()
+#     try:
+#         combo_mask = pd.read_pickle(
+#             f"2025-08-07/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
+#         )
+#     except:
+#         #  新股过滤
+#         new_stock_filter = get_new_stock_filter(stock_list, date_list)
+#         # st过滤
+#         st_filter = get_st_filter(stock_list, date_list)
+#         # 停牌过滤
+#         suspended_filter = get_suspended_filter(stock_list, date_list)
 
-    # dp因子
-    f_dp = Factor("dividend_yield_ttm")
-    f_dp = execute_factor(f_dp, stock_list, start_date, end_date)
+#         combo_mask = (
+#             new_stock_filter.astype(int)
+#             + st_filter.astype(int)
+#             + suspended_filter.astype(int)
+#             + (~stock_universe).astype(int)
+#         ) == 0
 
-    try:
-        combo_mask = pd.read_pickle(
-            f"2025-08-07/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
-        )
-    except:
-        #  新股过滤
-        new_stock_filter = get_new_stock_filter(stock_list, date_list)
-        # st过滤
-        st_filter = get_st_filter(stock_list, date_list)
-        # 停牌过滤
-        suspended_filter = get_suspended_filter(stock_list, date_list)
-        
-        combo_mask = (
-            new_stock_filter.astype(int)
-            + st_filter.astype(int)
-            + suspended_filter.astype(int)
-            + (~stock_universe).astype(int)
-        ) == 0
+#         os.makedirs("2025-08-07", exist_ok=True)
+#         combo_mask.to_pickle(
+#             f"2025-08-07/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
+#         )
 
-        os.makedirs("2025-08-07", exist_ok=True)
-        combo_mask.to_pickle(
-            f"2025-08-07/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
-        )
+#     # axis=1,过滤掉所有日期截面都是nan的股票
+#     factor = factor.mask(~combo_mask).dropna(axis=1, how="all")
 
-    f_dp = f_dp.mask(~combo_mask).dropna(axis=1, how="all")
+#     # 离群值处理
+#     factor = mad_vectorized(factor)
 
-    # 离群值处理
-    f_dp = mad_vectorized(f_dp)
+#     # 标准化处理
+#     factor = standardize(factor)
 
-    # 标准化处理
-    f_dp = standardize(f_dp)
+#     # 中性化处理
+#     factor = neutralization_vectorized(factor, stock_list)
 
-    # 中性化处理
-    f_dp = neutralization_vectorized(f_dp, stock_list)
+#     # 涨停过滤
+#     limit_up_filter = get_limit_up_filter(stock_list, date_list)
+#     factor = factor.mask(limit_up_filter)
+
+#     return factor
 
 
-    # 涨停过滤
-    limit_up_filter = get_limit_up_filter(stock_list, date_list)
-    f_dp = f_dp.mask(limit_up_filter)
+# if __name__ == "__main__":
 
-    # 计算IC
-    ic, performance = calc_ic(f_dp, change_day, index_item)
+#     start_date = "2022-01-01"
+#     end_date = "2025-07-01"
+#     index_item = "000852.XSHG"
+#     change_day = 20
+
+#     stock_universe = INDEX_FIX(start_date, end_date, index_item)
+#     stock_list = stock_universe.columns.tolist()
+#     date_list = stock_universe.index.tolist()
+
+#     # dp因子
+#     f_dp = Factor("dividend_yield_ttm")
+#     f_dp = execute_factor(f_dp, stock_list, start_date, end_date)
+
+#     try:
+#         combo_mask = pd.read_pickle(
+#             f"2025-08-07/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
+#         )
+#     except:
+#         #  新股过滤
+#         new_stock_filter = get_new_stock_filter(stock_list, date_list)
+#         # st过滤
+#         st_filter = get_st_filter(stock_list, date_list)
+#         # 停牌过滤
+#         suspended_filter = get_suspended_filter(stock_list, date_list)
+
+#         combo_mask = (
+#             new_stock_filter.astype(int)
+#             + st_filter.astype(int)
+#             + suspended_filter.astype(int)
+#             + (~stock_universe).astype(int)
+#         ) == 0
+
+#         os.makedirs("2025-08-07", exist_ok=True)
+#         combo_mask.to_pickle(
+#             f"2025-08-07/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
+#         )
+
+#     f_dp = f_dp.mask(~combo_mask).dropna(axis=1, how="all")
+
+#     # 离群值处理
+#     f_dp = mad_vectorized(f_dp)
+
+#     # 标准化处理
+#     f_dp = standardize(f_dp)
+
+#     # 中性化处理
+#     f_dp = neutralization_vectorized(f_dp, stock_list)
+
+#     # 涨停过滤
+#     limit_up_filter = get_limit_up_filter(stock_list, date_list)
+#     f_dp = f_dp.mask(limit_up_filter)
+
+#     # 计算IC
+#     ic, performance = calc_ic(f_dp, change_day, index_item)
