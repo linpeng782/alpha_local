@@ -253,7 +253,7 @@ def neutralization_vectorized(
     try:
         # 获取存储数据
         df_industry_market = pd.read_pickle(
-            f"2025-08-07/df_industry_market_{industry_type}_{index_item}_{start}_{end}.pkl"
+            f"factor_lib/df_industry_market_{industry_type}_{index_item}_{start}_{end}.pkl"
         )
     except:
         # 获取市值暴露度
@@ -271,9 +271,9 @@ def neutralization_vectorized(
         df_industry_market = industry_df
         df_industry_market.index.names = ["datetime", "order_book_id"]
         df_industry_market.dropna(axis=0, inplace=True)
-        os.makedirs("2025-08-07", exist_ok=True)
+        os.makedirs("factor_lib", exist_ok=True)
         df_industry_market.to_pickle(
-            f"2025-08-07/df_industry_market_{industry_type}_{index_item}_{start}_{end}.pkl"
+            f"factor_lib/df_industry_market_{industry_type}_{index_item}_{start}_{end}.pkl"
         )
 
     df_industry_market["factor"] = factor.stack()
@@ -315,10 +315,10 @@ def calc_ic(df, n, index_item, name="", Rank_IC=True):
     # 提取预存储数据
     try:
         # 开盘价
-        open = pd.read_pickle(f"2025-08-07/open_{index_item}_{start}_{end}.pkl")
+        open = pd.read_pickle(f"factor_lib/open_{index_item}_{start}_{end}.pkl")
     except:
         # 新建预存储文档
-        os.makedirs("2025-08-07", exist_ok=True)
+        os.makedirs("factor_lib", exist_ok=True)
         # 拿一个完整的券池表格，防止有些股票在某些日期没有数据，导致缓存数据不全，影响其他因子计算
         index_fix = INDEX_FIX(start, end, index_item)
         order_book_ids = index_fix.columns.tolist()
@@ -332,7 +332,7 @@ def calc_ic(df, n, index_item, name="", Rank_IC=True):
             fields="open",
         ).open.unstack("order_book_id")
         # 存储
-        open.to_pickle(f"2025-08-07/open_{index_item}_{start}_{end}.pkl")
+        open.to_pickle(f"factor_lib/open_{index_item}_{start}_{end}.pkl")
 
     # 未来一段收益股票的累计收益率计算
     return_n = open.pct_change(n).shift(-n - 1)
@@ -391,11 +391,11 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
     try:
         # 未来一天收益率
         return_1d = pd.read_pickle(
-            f"2025-08-07/return_1d_{index_item}_{start}_{end}.pkl"
+            f"factor_lib/return_1d_{index_item}_{start}_{end}.pkl"
         )
     except:
         # 新建预存储文档
-        os.makedirs("2025-08-07", exist_ok=True)
+        os.makedirs("factor_lib", exist_ok=True)
         # 拿一个完整的券池表格，防止有些股票在某些日期没有数据，导致缓存数据不全，影响其他因子计算
         index_fix = INDEX_FIX(start, end, index_item)
         order_book_ids = index_fix.columns.tolist()
@@ -412,9 +412,9 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
         ).open.unstack("order_book_id")
         return_1d = open.pct_change().shift(-1).dropna(axis=0, how="all").stack()
         # 存储
-        return_1d.to_pickle(f"2025-08-07/return_1d_{index_item}_{start}_{end}.pkl")
+        return_1d.to_pickle(f"factor_lib/return_1d_{index_item}_{start}_{end}.pkl")
 
-    # 数据喝收益合并
+    # 数据和收益合并
     group = df.stack().to_frame("factor")
     group["current_renturn"] = return_1d
     group = group.dropna()
@@ -555,55 +555,55 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
     return group_return, turnover_ratio
 
 
-# # 数据清洗封装函数
-# def data_clean(factor, stock_universe, index_item):
+# 数据清洗封装函数
+def data_clean(factor, stock_universe, index_item):
 
-#     stock_list = stock_universe.columns.tolist()
-#     date_list = stock_universe.index.tolist()
-#     start_date = date_list[0].strftime("%F")
-#     end_date = date_list[-1].strftime("%F")
+    stock_list = stock_universe.columns.tolist()
+    date_list = stock_universe.index.tolist()
+    start_date = date_list[0].strftime("%F")
+    end_date = date_list[-1].strftime("%F")
 
-#     try:
-#         combo_mask = pd.read_pickle(
-#             f"2025-08-07/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
-#         )
-#     except:
-#         #  新股过滤
-#         new_stock_filter = get_new_stock_filter(stock_list, date_list)
-#         # st过滤
-#         st_filter = get_st_filter(stock_list, date_list)
-#         # 停牌过滤
-#         suspended_filter = get_suspended_filter(stock_list, date_list)
+    try:
+        combo_mask = pd.read_pickle(
+            f"factor_lib/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
+        )
+    except:
+        #  新股过滤
+        new_stock_filter = get_new_stock_filter(stock_list, date_list)
+        # st过滤
+        st_filter = get_st_filter(stock_list, date_list)
+        # 停牌过滤
+        suspended_filter = get_suspended_filter(stock_list, date_list)
 
-#         combo_mask = (
-#             new_stock_filter.astype(int)
-#             + st_filter.astype(int)
-#             + suspended_filter.astype(int)
-#             + (~stock_universe).astype(int)
-#         ) == 0
+        combo_mask = (
+            new_stock_filter.astype(int)
+            + st_filter.astype(int)
+            + suspended_filter.astype(int)
+            + (~stock_universe).astype(int)
+        ) == 0
 
-#         os.makedirs("2025-08-07", exist_ok=True)
-#         combo_mask.to_pickle(
-#             f"2025-08-07/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
-#         )
+        os.makedirs("factor_lib", exist_ok=True)
+        combo_mask.to_pickle(
+            f"factor_lib/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
+        )
 
-#     # axis=1,过滤掉所有日期截面都是nan的股票
-#     factor = factor.mask(~combo_mask).dropna(axis=1, how="all")
+    # axis=1,过滤掉所有日期截面都是nan的股票
+    factor = factor.mask(~combo_mask).dropna(axis=1, how="all")
 
-#     # 离群值处理
-#     factor = mad_vectorized(factor)
+    # 离群值处理
+    factor = mad_vectorized(factor)
 
-#     # 标准化处理
-#     factor = standardize(factor)
+    # 标准化处理
+    factor = standardize(factor)
 
-#     # 中性化处理
-#     factor = neutralization_vectorized(factor, stock_list)
+    # 中性化处理
+    factor = neutralization_vectorized(factor, stock_list)
 
-#     # 涨停过滤
-#     limit_up_filter = get_limit_up_filter(stock_list, date_list)
-#     factor = factor.mask(limit_up_filter)
+    # 涨停过滤
+    limit_up_filter = get_limit_up_filter(stock_list, date_list)
+    factor = factor.mask(limit_up_filter)
 
-#     return factor
+    return factor
 
 
 # if __name__ == "__main__":
@@ -623,7 +623,7 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
 
 #     try:
 #         combo_mask = pd.read_pickle(
-#             f"2025-08-07/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
+#             f"factor_lib/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
 #         )
 #     except:
 #         #  新股过滤
@@ -640,9 +640,9 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
 #             + (~stock_universe).astype(int)
 #         ) == 0
 
-#         os.makedirs("2025-08-07", exist_ok=True)
+#         os.makedirs("factor_lib", exist_ok=True)
 #         combo_mask.to_pickle(
-#             f"2025-08-07/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
+#             f"factor_lib/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
 #         )
 
 #     f_dp = f_dp.mask(~combo_mask).dropna(axis=1, how="all")
