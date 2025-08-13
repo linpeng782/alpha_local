@@ -1,6 +1,7 @@
 import scipy as sp
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from scipy import stats
 import statsmodels.api as sm
 from pathlib import Path
@@ -29,6 +30,23 @@ plt.rcParams["axes.unicode_minus"] = False
 import warnings
 
 warnings.filterwarnings("ignore")
+
+
+# 热力图
+def hot_corr(name, ic_df):
+    """
+    :param name: 因子名称 -> list
+    :param ic_df: ic序列表 -> dataframe
+    :return fig: 热力图 -> plt
+    """
+    ax = plt.subplots(figsize=(len(name), len(name)))  # 调整画布大小
+    ax = sns.heatmap(
+        ic_df[name].corr(), vmin=0.4, square=True, annot=True, cmap="Greens"
+    )  # annot=True 表示显示系数
+    plt.title("Factors_IC_CORRELATION")
+    # 设置刻度字体大小
+    plt.xticks(fontsize=10)
+    plt.yticks(fontsize=10)
 
 
 # 动态券池
@@ -352,7 +370,7 @@ def calc_ic(df, n, index_item, name="", Rank_IC=True):
         "change_day": n,
         "IC mean": round(result.mean(), 4),
         "IC std": round(result.std(), 4),
-        "IR": round(result.mean() / result.std(), 4),
+        "ICIR": round(result.mean() / result.std(), 4),
         "IC>0": round(len(result[result > 0].dropna()) / len(result), 4),
         "ABS_IC>2%": round(len(result[abs(result) > 0.02].dropna()) / len(result), 4),
         "t_stat": round(t_stat, 4),
@@ -421,7 +439,7 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
     group.reset_index(inplace=True)
     group.columns = ["date", "stock", "factor", "current_renturn"]
 
-    # 空换手率 和 空分组收益率表格
+    # 换手率 和 分组收益率表格
     turnover_ratio = pd.DataFrame()
     group_return = pd.DataFrame()
 
@@ -606,59 +624,441 @@ def data_clean(factor, stock_universe, index_item):
     return factor
 
 
-# if __name__ == "__main__":
+# 获取买入队列
+def get_buy_list(df, top_type="rank", rank_n=100, quantile_q=0.8):
+    """
+    :param df: 因子值 -> dataframe/unstack
+    :param top_type: 选择买入队列方式，从['rank','quantile']选择一种方式 -> str
+    :param rank_n: 值最大的前n只的股票 -> int
+    :param quantile_q: 值最大的前n分位数的股票 -> float
+    :return df: 买入队列 -> dataframe/unstack
+    """
 
-#     start_date = "2022-01-01"
-#     end_date = "2025-07-01"
-#     index_item = "000852.XSHG"
-#     change_day = 20
+    if top_type == "rank":
+        df = df.rank(axis=1, ascending=False) <= rank_n
+    elif top_type == "quantile":
+        df = df.sub(df.quantile(quantile_q, axis=1), axis=0) > 0
+    else:
+        print("select one from ['rank','quantile']")
 
-#     stock_universe = INDEX_FIX(start_date, end_date, index_item)
-#     stock_list = stock_universe.columns.tolist()
-#     date_list = stock_universe.index.tolist()
+    df = df.astype(int)
+    df = df.replace(0, np.nan).dropna(how="all", axis=1)
 
-#     # dp因子
-#     f_dp = Factor("dividend_yield_ttm")
-#     f_dp = execute_factor(f_dp, stock_list, start_date, end_date)
+    return df
 
-#     try:
-#         combo_mask = pd.read_pickle(
-#             f"factor_lib/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
-#         )
-#     except:
-#         #  新股过滤
-#         new_stock_filter = get_new_stock_filter(stock_list, date_list)
-#         # st过滤
-#         st_filter = get_st_filter(stock_list, date_list)
-#         # 停牌过滤
-#         suspended_filter = get_suspended_filter(stock_list, date_list)
 
-#         combo_mask = (
-#             new_stock_filter.astype(int)
-#             + st_filter.astype(int)
-#             + suspended_filter.astype(int)
-#             + (~stock_universe).astype(int)
-#         ) == 0
+# 4.2 获取标的收益
+def get_bar(df, adjust):
+    """
+    :param df: 买入队列 -> dataframe/unstack
+    :return ret: 基准的逐日收益 -> dataframe
+    """
+    start_date = get_previous_trading_date(df.index.min(), 1).strftime("%F")
+    end_date = df.index.max().strftime("%F")
+    stock_list = df.columns.tolist()
+    price_open = get_price(
+        stock_list, start_date, end_date, fields=["open"], adjust_type=adjust
+    ).open.unstack("order_book_id")
 
-#         os.makedirs("factor_lib", exist_ok=True)
-#         combo_mask.to_pickle(
-#             f"factor_lib/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
-#         )
+    return price_open
 
-#     f_dp = f_dp.mask(~combo_mask).dropna(axis=1, how="all")
 
-#     # 离群值处理
-#     f_dp = mad_vectorized(f_dp)
+# 4.3 获取基准收益
+def get_benchmark(df, benchmark, benchmark_type="mcw"):
+    """
+    :param df: 买入队列 -> dataframe/unstack
+    :param benchmark: 基准指数 -> str
+    :return ret: 基准的逐日收益 -> dataframe
+    """
+    start_date = get_previous_trading_date(df.index.min(), 1).strftime("%F")
+    end_date = df.index.max().strftime("%F")
+    if benchmark_type == "mcw":
+        price_open = get_price(
+            [benchmark], start_date, end_date, fields=["open"]
+        ).open.unstack("order_book_id")
+    else:
+        index_fix = INDEX_FIX(start_date, end_date, benchmark)
+        stock_list = index_fix.columns.tolist()
+        price_open = get_price(
+            stock_list, start_date, end_date, fields=["open"]
+        ).open.unstack("order_book_id")
+        price_open = price_open.pct_change().mask(~index_fix).mean(axis=1)
+        price_open = (1 + price_open).cumprod().to_frame(benchmark)
 
-#     # 标准化处理
-#     f_dp = standardize(f_dp)
+    return price_open
 
-#     # 中性化处理
-#     f_dp = neutralization_vectorized(f_dp, stock_list)
 
-#     # 涨停过滤
-#     limit_up_filter = get_limit_up_filter(stock_list, date_list)
-#     f_dp = f_dp.mask(limit_up_filter)
+# 4.4 回测框架
+def backtest(
+    portfolio_weights,
+    rebalance_frequency=20,
+    initial_capital=10000 * 10000,
+    stamp_tax_rate=0.0005,
+    transfer_fee_rate=0.0001,
+    commission_rate=0.0002,
+    min_transaction_fee=5,
+    cash_annual_yield=0.02,
+):
+    """
+    量化策略回测框架
 
-#     # 计算IC
-#     ic, performance = calc_ic(f_dp, change_day, index_item)
+    :param portfolio_weights: 投资组合权重矩阵 -> DataFrame
+    :param rebalance_frequency: 调仓频率（天数） -> int
+    :param initial_capital: 初始资本 -> float
+    :param stamp_tax_rate: 印花税率 -> float
+    :param transfer_fee_rate: 过户费率 -> float
+    :param commission_rate: 佣金率 -> float
+    :param min_transaction_fee: 最低交易手续费 -> float
+    :param cash_annual_yield: 现金年化收益率 -> float
+    :return: 账户历史记录 -> DataFrame
+    """
+
+    # =========================== 基础参数初始化 ===========================
+    # 保存初始资本备份，用于最后的统计计算
+    cash = initial_capital
+    # 初始化历史持仓，第一次调仓时为0
+    previous_holdings = 0
+    # 买入成本费率：过户费 + 佣金
+    buy_cost_rate = transfer_fee_rate + commission_rate
+    # 卖出成本费率：印花税 + 过户费 + 佣金
+    sell_cost_rate = stamp_tax_rate + transfer_fee_rate + commission_rate
+    # 现金账户日利率（年化收益率转换为日收益率）
+    daily_cash_yield = (1 + cash_annual_yield) ** (1 / 252) - 1
+
+    # =========================== 数据结构初始化 ===========================
+    # 创建账户历史记录表，索引为所有交易日
+    account_history = pd.DataFrame(
+        index=portfolio_weights.index,
+        # 列1：账户总资产
+        # 列2：持仓市值
+        # 列3：现金账户余额
+        columns=["total_account_asset", "holding_market_cap", "cash_account"],
+    )
+    # 获取所有股票的开盘价格数据（未复权）
+    open_prices = get_bar(portfolio_weights, "none")
+    # 获取所有股票的后复权价格数据
+    adjusted_prices = get_bar(portfolio_weights, "post")
+    # 获取每只股票的最小交易单位（通常为100股）
+    min_trade_units = pd.Series(
+        dict(
+            [
+                (stock, instruments(stock).round_lot)
+                for stock in portfolio_weights.columns.tolist()
+            ]
+        )
+    )
+    # 生成调仓日期列表：每 rebalance_frequency 天调仓一次
+    # 确保最后一天也被包含在调仓日中
+    rebalance_dates = sorted(
+        set(
+            portfolio_weights.index.tolist()[::rebalance_frequency]
+            + [portfolio_weights.index[-1]]
+        )
+    )
+
+    # =========================== 开始逐期调仓循环 ===========================
+    for i in tqdm(range(0, len(rebalance_dates) - 1)):
+        rebalance_date = rebalance_dates[i]  # 当前调仓日期
+        next_rebalance_date = rebalance_dates[i + 1]  # 下一个调仓日期
+
+        # =========================== 获取当前调仓日的目标权重 ===========================
+        # 获取当前调仓日的目标权重，并删除缺失值
+        current_target_weights = portfolio_weights.loc[rebalance_date].dropna()
+        # 获取目标股票列表
+        target_stocks = current_target_weights.index.tolist()
+
+        # =========================== 计算目标持仓数量 ===========================
+        # 计算公式：目标持仓 = 向下取整(权重 * 可用资金 / (调整后价格 * 最小交易单位)) * 最小交易单位
+        # 步骤1：按权重分配资金
+        # 步骤2：乘以可用资金
+        # 步骤3：除以调整后的股价（预留卖出手续费）
+        # 步骤4：向下取整到最小交易单位的整数倍
+        # 步骤5：转换为实际可交易的股数
+        target_holdings = (
+            current_target_weights
+            * cash
+            / (open_prices.loc[rebalance_date, target_stocks] * (1 + sell_cost_rate))
+            // min_trade_units.loc[target_stocks]
+        ) * min_trade_units.loc[target_stocks]
+
+        # =========================== 仓位变动计算 ===========================
+        ## 步骤1：计算持仓变动量（目标持仓 - 历史持仓）
+        # fill_value=0 确保新增股票（历史持仓为空）和清仓股票（目标持仓为空）都能正确计算
+        holdings_change_raw = target_holdings.sub(
+            previous_holdings, fill_value=0
+        )  # 计算原始持仓变动量
+
+        ## 步骤2：过滤掉无变动的股票（变动量为0的股票）
+        # 将变动量为0的股票标记为NaN，然后删除，只保留需要调仓的股票
+        holdings_change_filtered = holdings_change_raw.replace(
+            0, np.nan
+        )  # 将无变动的股票标记为NaN
+
+        ## 步骤3：获取最终的交易执行列表
+        # 正数表示需要买入的股数，负数表示需要卖出的股数
+        trades_to_execute = (
+            holdings_change_filtered.dropna()
+        )  # 删除NaN，只保留需要执行的交易
+
+        # =========================== 获取当前交易日价格 ===========================
+        current_prices = open_prices.loc[
+            rebalance_date
+        ]  # 获取当前调仓日的所有股票开盘价
+
+        # =========================== 计算交易成本 ===========================
+        def calc_transaction_fee(transaction_value, min_transaction_fee):
+            """
+            计算单笔交易的手续费
+            :param transaction_value: 交易金额（正数为买入，负数为卖出）
+            :param min_transaction_fee: 最低交易手续费
+            :return: 交易手续费
+            """
+            if pd.isna(transaction_value) or transaction_value == 0:
+                return 0  # 无交易时手续费为0
+            elif transaction_value < 0:  # 卖出交易（负数）
+                fee = (
+                    -transaction_value * sell_cost_rate
+                )  # 卖出手续费：印花税 + 过户费 + 佣金
+            else:  # 买入交易（正数）
+                fee = transaction_value * buy_cost_rate  # 买入手续费：过户费 + 佣金
+
+            # 应用最低手续费限制
+            return max(fee, min_transaction_fee)  # 返回实际手续费和最低手续费中的较大值
+
+        # 计算总交易成本：交易金额 = 价格 * 交易股数
+        # 计算每笔交易的交易金额
+        # 对每笔交易计算手续费
+        # 求和得到总手续费
+        total_transaction_cost = (
+            (current_prices * trades_to_execute)
+            .apply(lambda x: calc_transaction_fee(x, min_transaction_fee))
+            .sum()
+        )
+
+        # =========================== 价格复权调整 ===========================
+        # 计算从调仓日到下一调仓日的价格复权比率
+        price_adjustment_ratio = (
+            adjusted_prices.loc[rebalance_date:next_rebalance_date]
+            / adjusted_prices.loc[rebalance_date]
+        )  # 复权比率 = 期间价格 / 起始价格
+
+        # 将复权比率应用到当日开盘价，得到期间调整后价格
+        period_adjusted_prices = (
+            price_adjustment_ratio.T.mul(  # 转置以便于计算
+                current_prices, axis=0
+            )  # 乘以当日开盘价
+            .dropna(how="all")
+            .T
+        )  # 删除全为NaN的行并转置回来
+
+        # =========================== 计算投资组合市值 ===========================
+        # 投资组合市值 = 每只股票的(调整后价格 * 持仓数量)的总和
+        portfolio_market_value = (period_adjusted_prices * target_holdings).sum(
+            axis=1
+        )  # 按日计算投资组合市值
+
+        # =========================== 计算现金账户余额 ===========================
+        # 初始现金余额 = 可用资金 - 交易成本 - 初始投资金额
+        initial_cash_balance = (
+            cash - total_transaction_cost - portfolio_market_value.loc[rebalance_date]
+        )
+
+        # 计算期间现金账户的复利增长（按日计息）
+        cash_balance = pd.Series(
+            [
+                initial_cash_balance
+                * ((1 + daily_cash_yield) ** (day + 1))  # 复利计息公式
+                for day in range(0, len(portfolio_market_value))
+            ],  # 对每一天计算
+            index=portfolio_market_value.index,
+        )  # 使用相同的日期索引
+
+        # =========================== 计算账户总资产 ===========================
+        total_portfolio_value = (
+            portfolio_market_value + cash_balance
+        )  # 总资产 = 持仓市值 + 现金余额
+
+        # =========================== 更新历史数据为下一次调仓做准备 ===========================
+        previous_holdings = target_holdings  # 更新历史持仓为当前目标持仓
+        cash = total_portfolio_value.loc[
+            next_rebalance_date
+        ]  # 更新可用资金为下一调仓日的账户总值
+
+        # =========================== 保存账户历史记录 ===========================
+        # 将当前期间的账户数据保存到历史记录中（保疙2位小数）
+        account_history.loc[
+            rebalance_date:next_rebalance_date, "total_account_asset"
+        ] = round(total_portfolio_value, 2)
+        account_history.loc[
+            rebalance_date:next_rebalance_date, "holding_market_cap"
+        ] = round(portfolio_market_value, 2)
+        account_history.loc[rebalance_date:next_rebalance_date, "cash_account"] = round(
+            cash_balance, 2
+        )
+
+    # =========================== 添加初始日记录并排序 ===========================
+    # 在第一个交易日之前添加初始资本记录
+    initial_date = pd.to_datetime(
+        get_previous_trading_date(account_history.index.min(), 1)
+    )
+    account_history.loc[initial_date] = [
+        initial_capital,
+        0,
+        initial_capital,
+    ]  # [总资产, 持仓市值, 现金余额]
+    account_history = account_history.sort_index()  # 按日期排序
+
+    return account_history  # 返回完整的账户历史记录
+
+
+# 4.5 回测绩效指标绘制
+def get_performance_analysis(account_result, rf=0.03, benchmark_index="000985.XSHG"):
+
+    # 加入基准
+    performance = pd.concat(
+        [
+            account_result["total_account_asset"].to_frame("strategy"),
+            get_benchmark(account_result, benchmark_index),
+        ],
+        axis=1,
+    )
+    performance_net = performance.pct_change().dropna(how="all")  # 清算至当日开盘
+    performance_cumnet = (1 + performance_net).cumprod()
+    performance_cumnet["alpha"] = (
+        performance_cumnet["strategy"] / performance_cumnet[benchmark_index]
+    )
+    performance_cumnet = performance_cumnet.fillna(1)
+
+    # 指标计算
+    performance_pct = performance_cumnet.pct_change().dropna()
+
+    # 策略收益
+    strategy_name, benchmark_name, alpha_name = performance_cumnet.columns.tolist()
+    Strategy_Final_Return = performance_cumnet[strategy_name].iloc[-1] - 1
+
+    # 策略年化收益
+    Strategy_Annualized_Return_EAR = (1 + Strategy_Final_Return) ** (
+        252 / len(performance_cumnet)
+    ) - 1
+
+    # 基准收益
+    Benchmark_Final_Return = performance_cumnet[benchmark_name].iloc[-1] - 1
+
+    # 基准年化收益
+    Benchmark_Annualized_Return_EAR = (1 + Benchmark_Final_Return) ** (
+        252 / len(performance_cumnet)
+    ) - 1
+
+    # alpha
+    ols_result = sm.OLS(
+        performance_pct[strategy_name] * 252 - rf,
+        sm.add_constant(performance_pct[benchmark_name] * 252 - rf),
+    ).fit()
+    Alpha = ols_result.params[0]
+
+    # beta
+    Beta = ols_result.params[1]
+
+    # beta_2 = np.cov(performance_pct[strategy_name],performance_pct[benchmark_name])[0,1]/performance_pct[benchmark_name].var()
+    # 波动率
+    Strategy_Volatility = performance_pct[strategy_name].std() * np.sqrt(252)
+
+    # 夏普
+    Strategy_Sharpe = (Strategy_Annualized_Return_EAR - rf) / Strategy_Volatility
+
+    # 下行波动率
+    strategy_ret = performance_pct[strategy_name]
+    Strategy_Down_Volatility = strategy_ret[strategy_ret < 0].std() * np.sqrt(252)
+
+    # sortino
+    Sortino = (Strategy_Annualized_Return_EAR - rf) / Strategy_Down_Volatility
+
+    # 跟踪误差
+    Tracking_Error = (
+        performance_pct[strategy_name] - performance_pct[benchmark_name]
+    ).std() * np.sqrt(252)
+
+    # 信息比率
+    Information_Ratio = (
+        Strategy_Annualized_Return_EAR - Benchmark_Annualized_Return_EAR
+    ) / Tracking_Error
+
+    # 最大回测
+    i = np.argmax(
+        (
+            np.maximum.accumulate(performance_cumnet[strategy_name])
+            - performance_cumnet[strategy_name]
+        )
+        / np.maximum.accumulate(performance_cumnet[strategy_name])
+    )
+    j = np.argmax(performance_cumnet[strategy_name][:i])
+    Max_Drawdown = (
+        1 - performance_cumnet[strategy_name][i] / performance_cumnet[strategy_name][j]
+    )
+
+    # 卡玛比率
+    Calmar = (Strategy_Annualized_Return_EAR) / Max_Drawdown
+
+    # 超额收益
+    Alpha_Final_Return = performance_cumnet[alpha_name].iloc[-1] - 1
+
+    # 超额年化收益
+    Alpha_Annualized_Return_EAR = (1 + Alpha_Final_Return) ** (
+        252 / len(performance_cumnet)
+    ) - 1
+
+    # 超额波动率
+    Alpha_Volatility = performance_pct[alpha_name].std() * np.sqrt(252)
+
+    # 超额夏普
+    Alpha_Sharpe = (Alpha_Annualized_Return_EAR - rf) / Alpha_Volatility
+
+    # 超额最大回测
+    i = np.argmax(
+        (
+            np.maximum.accumulate(performance_cumnet[alpha_name])
+            - performance_cumnet[alpha_name]
+        )
+        / np.maximum.accumulate(performance_cumnet[alpha_name])
+    )
+    j = np.argmax(performance_cumnet[alpha_name][:i])
+    Alpha_Max_Drawdown = (
+        1 - performance_cumnet[alpha_name][i] / performance_cumnet[alpha_name][j]
+    )
+
+    # 胜率
+    performance_pct["win"] = performance_pct[alpha_name] > 0
+    Win_Ratio = performance_pct["win"].value_counts().loc[True] / len(performance_pct)
+
+    # 盈亏比
+    profit_lose = performance_pct.groupby("win")[alpha_name].mean()
+    Profit_Lose_Ratio = abs(profit_lose[True] / profit_lose[False])
+
+    result = {
+        "策略累计收益": round(Strategy_Final_Return, 4),
+        "策略年化收益": round(Strategy_Annualized_Return_EAR, 4),
+        "基准累计收益": round(Benchmark_Final_Return, 4),
+        "基准年化收益": round(Benchmark_Annualized_Return_EAR, 4),
+        "阿尔法": round(Alpha, 4),
+        "贝塔": round(Beta, 4),
+        "波动率": round(Strategy_Volatility, 4),
+        "夏普比率": round(Strategy_Sharpe, 4),
+        "下行波动率": round(Strategy_Down_Volatility, 4),
+        "索提诺比率": round(Sortino, 4),
+        "跟踪误差": round(Tracking_Error, 4),
+        "信息比率": round(Information_Ratio, 4),
+        "最大回撤": round(Max_Drawdown, 4),
+        "卡玛比率": round(Calmar, 4),
+        "超额累计收益": round(Alpha_Final_Return, 4),
+        "超额年化收益": round(Alpha_Annualized_Return_EAR, 4),
+        "超额波动率": round(Alpha_Volatility, 4),
+        "超额夏普": round(Alpha_Sharpe, 4),
+        "超额最大回撤": round(Alpha_Max_Drawdown, 4),
+        "胜率": round(Win_Ratio, 4),
+        "盈亏比": round(Profit_Lose_Ratio, 4),
+    }
+
+    performance_cumnet.plot(secondary_y="alpha", figsize=(10, 6))
+    print(pd.DataFrame([result]).T)
+
+    return performance_cumnet, result
