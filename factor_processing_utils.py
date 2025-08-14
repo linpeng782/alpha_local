@@ -402,6 +402,7 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
     # 基础数据获取
     order_book_ids = df.columns.tolist()
     datetime_period = df.index
+    datetime_period = datetime_period[:-7]
     start = datetime_period.min().strftime("%F")
     end = datetime_period.max().strftime("%F")
 
@@ -492,6 +493,9 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
         else:
             # 完整周期
             period = group[group.date.isin(datetime_period[i:])]
+
+        if i == 2540:
+            breakpoint()
 
         # 计算各分组收益率（期间不rebalance权重）
         group_return_temp = []
@@ -622,6 +626,222 @@ def data_clean(factor, stock_universe, index_item):
     factor = factor.mask(limit_up_filter)
 
     return factor
+
+
+def factor_layered_backtest(df, n, g, index_item, name="", rebalance=False):
+    """
+    因子分层回测函数（优化版）
+
+    :param df: 因子值 DataFrame (unstack格式)
+    :param n: 调仓频率（天数）
+    :param g: 分组数量
+    :param index_item: 券池名称
+    :param name: 因子名称
+    :param rebalance: 是否每日重新平衡权重
+        - True: 每日等权重平均（高交易成本）
+        - False: 买入持有策略（低交易成本）
+    :return: (group_return, turnover_ratio)
+        - group_return: 各分组的累计净值表现
+        - turnover_ratio: 各分组的换手率
+    """
+
+    df = df.shift(1).iloc[1:]
+    order_book_ids = df.columns.tolist()
+    datetime_period = df.index
+    datetime_period = datetime_period[:-7]
+    start = datetime_period.min().strftime("%F")
+    end = datetime_period.max().strftime("%F")
+
+    try:
+        return_1d = pd.read_pickle(
+            f"factor_lib/return_1d_{index_item}_{start}_{end}.pkl"
+        )
+    except:
+        os.makedirs("factor_lib", exist_ok=True)
+        index_fix = INDEX_FIX(start, end, index_item)
+        order_book_ids = index_fix.columns.tolist()
+        open = get_price(
+            order_book_ids,
+            start,
+            get_next_trading_date(end, 1),
+            "1d",
+            "open",
+            "pre",
+            False,
+            True,
+        ).open.unstack("order_book_id")
+        return_1d = open.pct_change().shift(-1).dropna(axis=0, how="all").stack()
+        return_1d.to_pickle(f"factor_lib/return_1d_{index_item}_{start}_{end}.pkl")
+
+    # 数据合并，使用multiindex
+    factor_data = df.stack().to_frame("factor")
+    factor_data["current_return"] = return_1d
+    factor_data = factor_data.dropna()
+
+    # 获取调仓日期和数据边界
+    actual_rebalance_dates = datetime_period[::n]  # 真正的调仓日期
+    #data_end_date = datetime_period[-1]  # 数据结束边界
+    
+    # 批量分组
+    all_groups = {}
+    turnover_data = []
+
+    ##########计算调仓日分组和换手率##########
+    # 为所有调仓日期构建分组信息
+    for i, date in enumerate(actual_rebalance_dates):
+        # 获取当前因子值
+        current_factors = factor_data.loc[date, "factor"]
+
+        # 使用qcut进行分组
+        groups = pd.qcut(current_factors, g, labels=range(1, g + 1))  
+        current_groups = (
+            current_factors.groupby(groups).apply(lambda x: x.index.tolist()).to_dict()
+        )
+
+        # 计算换手率（除了第一次）
+        if i > 0:
+            turnover_rates = []
+            for group_id in range(1, g + 1):
+                if group_id in all_groups[i - 1] and group_id in current_groups:
+                    old_stocks = set(all_groups[i - 1][group_id])
+                    new_stocks = set(current_groups[group_id])
+                    turnover = (
+                        len(old_stocks - new_stocks) / len(old_stocks)
+                        if old_stocks
+                        else 0
+                    )
+                    turnover_rates.append(turnover)
+                else:
+                    turnover_rates.append(np.nan)
+
+            turnover_data.append({"date": date, "turnover": turnover_rates})
+
+        all_groups[i] = current_groups
+    
+    if turnover_data:
+        turnover_ratio = pd.DataFrame(
+            [d["turnover"] for d in turnover_data],
+            index=[d["date"] for d in turnover_data],
+            columns=[f"G{i}" for i in range(1, g + 1)],
+        )
+    else:
+        turnover_ratio = pd.DataFrame()
+    
+    print("turnover_ratio",turnover_ratio)
+
+    ##########计算分组收益##########
+    group_returns_list = []
+    
+    # 处理所有调仓周期
+    for i, start_date in enumerate(actual_rebalance_dates):
+        
+        # 确定周期结束日期
+        is_last_period = (i == len(actual_rebalance_dates) - 1)
+        
+        if not is_last_period:
+            # 正常周期：到下一个调仓日
+            end_date = actual_rebalance_dates[i + 1]
+            period_mask = (factor_data.index.get_level_values(0) >= start_date) & (
+                factor_data.index.get_level_values(0) < end_date
+            )
+        else:
+            # 最后一个周期：到数据结束日
+            period_mask = factor_data.index.get_level_values(0) >= start_date
+
+        period_data = factor_data[period_mask]
+
+        if i not in all_groups:
+            continue
+
+        group_dict = all_groups[i]
+        period_returns = {}
+
+        for group_id in range(1, g + 1):
+            if group_id not in group_dict:
+                continue
+
+            stocks = group_dict[group_id]
+            # 获取该组股票的收益率数据
+            group_data = period_data[period_data.index.get_level_values(1).isin(stocks)]
+
+            if len(group_data) == 0:
+                continue
+
+            # 根据rebalance参数选择计算方式
+            if rebalance:
+                # 每日等权重平均（每天重新平衡权重）
+                portfolio_daily_returns = group_data.groupby(level=0)[
+                    "current_return"
+                ].mean()
+            else:
+
+                # 将数据重新整理为日期×股票的格式
+                stock_daily_returns = group_data.reset_index().pivot(
+                    index="datetime", columns="order_book_id", values="current_return"
+                )
+                # 等权重买入股票，不重新平衡
+                group_cum_returns = (1 + stock_daily_returns).cumprod().mean(axis=1)
+                portfolio_daily_returns = group_cum_returns.pct_change()  # 转为日收益率
+
+                # 处理第一天的收益率
+                if not portfolio_daily_returns.empty:
+                    portfolio_daily_returns.iloc[0] = stock_daily_returns.iloc[0].mean()
+
+            period_returns[f"G{group_id}"] = portfolio_daily_returns
+
+        # 将该期间收益率添加到总列表中
+        if period_returns:
+            period_df = pd.DataFrame(period_returns)
+            group_returns_list.append(period_df)
+
+    if group_returns_list:
+        group_return = pd.concat(group_returns_list, axis=0)
+    else:
+        group_return = pd.DataFrame()
+
+    if not group_return.empty:
+        # 基准收益
+        group_return["Benchmark"] = group_return.mean(axis=1)
+        group_return = (group_return + 1).cumprod()
+        print(group_return)
+
+        # 计算年化收益率
+        group_annual_ret = group_return.iloc[-1] ** (252 / len(group_return)) - 1
+        group_annual_ret = group_annual_ret - group_annual_ret.Benchmark
+        group_annual_ret = group_annual_ret.drop("Benchmark").to_frame("annual_ret")
+        group_annual_ret["group"] = list(range(1, g + 1))
+        corr_value = round(group_annual_ret.corr(method="spearman").iloc[0, 1], 4)
+
+        group_annual_ret.annual_ret.plot(
+            kind="bar",
+            figsize=(10, 5),
+            title=f"{name}_分层超额年化收益_单调性{corr_value}",
+        )
+
+        group_return.plot(figsize=(10, 5), title=f"{name}_分层净值表现")
+
+        yby_performance = (
+            group_return.pct_change()
+            .resample("Y")
+            .apply(lambda x: (1 + x).cumprod().iloc[-1])
+            .T
+        )
+        yby_performance -= yby_performance.loc["Benchmark"]
+        yby_performance = yby_performance.replace(0, np.nan).dropna(how="all")
+        yby_performance.plot(
+            kind="bar",
+            figsize=(10, 5),
+            title=f"{name}_逐年分层年化收益",
+            color=[
+                "powderblue",
+                "lightskyblue",
+                "cornflowerblue",
+                "steelblue",
+                "royalblue",
+            ],
+        )
+
+    return group_return, turnover_ratio
 
 
 # 获取买入队列
