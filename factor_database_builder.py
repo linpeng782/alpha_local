@@ -154,7 +154,6 @@ class FactorDatabaseBuilder:
                     end_date,
                     stock_universe,
                     index_item,
-                    daily_data,
                     force_rebuild,
                 )
                 factor_list.append(factor_stacked)
