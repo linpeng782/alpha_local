@@ -171,11 +171,11 @@ class FactorDatabaseBuilder:
         all_factors = pd.concat(factor_list, axis=1)
 
         # 与价格数据合并
-        print(f"合并价格数据，使用 {join_type} 连接...")
+        #print(f"合并价格数据，使用 {join_type} 连接...")
         final_df = pd.concat([daily_data, all_factors], axis=1, join=join_type)
 
         # 生成质量报告
-        print("生成质量报告...")
+        #print("生成质量报告...")
         quality_report = self.generate_quality_report(final_df)
 
         # 保存最终结果

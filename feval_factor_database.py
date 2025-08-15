@@ -3,7 +3,6 @@
 用于运行因子数据库构建任务
 """
 
-from rqdatac.services import market_data
 from factor_database_builder import FactorDatabaseBuilder
 from factor_config import FACTOR_DICT, DEFAULT_CONFIG
 from factor_processing_utils import *
