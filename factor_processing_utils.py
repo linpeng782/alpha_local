@@ -402,7 +402,6 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
     # 基础数据获取
     order_book_ids = df.columns.tolist()
     datetime_period = df.index
-    datetime_period = datetime_period[:-7]
     start = datetime_period.min().strftime("%F")
     end = datetime_period.max().strftime("%F")
 
@@ -578,7 +577,7 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
 
 
 # 数据清洗封装函数
-def data_clean(factor, stock_universe, index_item):
+def preprocess_factor(factor, stock_universe, index_item):
 
     stock_list = stock_universe.columns.tolist()
     date_list = stock_universe.index.tolist()
@@ -648,7 +647,6 @@ def factor_layered_backtest(df, n, g, index_item, name="", rebalance=False):
     df = df.shift(1).iloc[1:]
     order_book_ids = df.columns.tolist()
     datetime_period = df.index
-    datetime_period = datetime_period[:-7]
     start = datetime_period.min().strftime("%F")
     end = datetime_period.max().strftime("%F")
 
