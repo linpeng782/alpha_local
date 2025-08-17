@@ -550,7 +550,9 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
         kind="bar", figsize=(10, 5), title=f"{name}_分层超额年化收益_单调性{corr_value}"
     )
 
-    group_return.plot(figsize=(10, 5), title=f"{name}_分层净值表现")
+    # 净值表现图 - 优化图例显示
+    ax = group_return.plot(figsize=(10, 5), title=f"{name}_分层净值表现")
+    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', ncol=1, fontsize=8)
 
     yby_performance = (
         group_return.pct_change()
@@ -560,18 +562,30 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
     )
     yby_performance -= yby_performance.loc["Benchmark"]
     yby_performance = yby_performance.replace(0, np.nan).dropna(how="all")
-    yby_performance.plot(
+    
+    # 定义丰富的颜色调色板
+    colors = [
+        '#FF6B6B',  # 珊瑚红
+        '#4ECDC4',  # 青绿色
+        '#45B7D1',  # 天蓝色
+        '#96CEB4',  # 薄荷绿
+        '#FFEAA7',  # 浅黄色
+        '#DDA0DD',  # 梅花色
+        '#98D8C8',  # 薄荷蓝
+        '#F7DC6F',  # 金黄色
+        '#BB8FCE',  # 淡紫色
+        '#85C1E9',  # 浅蓝色
+    ]
+    
+    # 逐年分层年化收益图 - 优化颜色和图例
+    ax = yby_performance.plot(
         kind="bar",
-        figsize=(10, 5),
+        figsize=(12, 6),
         title=f"{name}_逐年分层年化收益",
-        color=[
-            "powderblue",
-            "lightskyblue",
-            "cornflowerblue",
-            "steelblue",
-            "royalblue",
-        ],
+        color=colors[:len(yby_performance.columns)],
     )
+    # 设置图例为水平排列，位置在图下方
+    ax.legend(bbox_to_anchor=(0.5, -0.15), loc='upper center', ncol=5, fontsize=9)
 
     return group_return, turnover_ratio
 
@@ -678,8 +692,8 @@ def factor_layered_backtest(df, n, g, index_item, name="", rebalance=False):
 
     # 获取调仓日期和数据边界
     actual_rebalance_dates = datetime_period[::n]  # 真正的调仓日期
-    #data_end_date = datetime_period[-1]  # 数据结束边界
-    
+    # data_end_date = datetime_period[-1]  # 数据结束边界
+
     # 批量分组
     all_groups = {}
     turnover_data = []
@@ -715,7 +729,7 @@ def factor_layered_backtest(df, n, g, index_item, name="", rebalance=False):
             turnover_data.append({"date": date, "turnover": turnover_rates})
 
         all_groups[i] = current_groups
-    
+
     if turnover_data:
         turnover_ratio = pd.DataFrame(
             [d["turnover"] for d in turnover_data],
@@ -724,18 +738,16 @@ def factor_layered_backtest(df, n, g, index_item, name="", rebalance=False):
         )
     else:
         turnover_ratio = pd.DataFrame()
-    
-    print("turnover_ratio",turnover_ratio)
 
     ##########计算分组收益##########
     group_returns_list = []
-    
-    # 处理所有调仓周期
+
+    # 处理所有调仓周期（周期含义：调仓日）
     for i, start_date in enumerate(actual_rebalance_dates):
-        
+
         # 确定周期结束日期
         is_last_period = (i == len(actual_rebalance_dates) - 1)
-        
+
         if not is_last_period:
             # 正常周期：到下一个调仓日
             end_date = actual_rebalance_dates[i + 1]
@@ -765,7 +777,7 @@ def factor_layered_backtest(df, n, g, index_item, name="", rebalance=False):
             if len(group_data) == 0:
                 continue
 
-            # 根据rebalance参数选择计算方式
+            # 根据rebalance参数选择计算方式，有每日重新平衡和买入持有两种方式
             if rebalance:
                 # 每日等权重平均（每天重新平衡权重）
                 portfolio_daily_returns = group_data.groupby(level=0)[
@@ -801,7 +813,6 @@ def factor_layered_backtest(df, n, g, index_item, name="", rebalance=False):
         # 基准收益
         group_return["Benchmark"] = group_return.mean(axis=1)
         group_return = (group_return + 1).cumprod()
-        print(group_return)
 
         # 计算年化收益率
         group_annual_ret = group_return.iloc[-1] ** (252 / len(group_return)) - 1
@@ -816,8 +827,40 @@ def factor_layered_backtest(df, n, g, index_item, name="", rebalance=False):
             title=f"{name}_分层超额年化收益_单调性{corr_value}",
         )
 
-        group_return.plot(figsize=(10, 5), title=f"{name}_分层净值表现")
+        # 净值表现图 - 突出G1和G10组，弱化其他组
+        fig, ax = plt.subplots(figsize=(10, 5))
+        
+        # 绘制所有组的线条
+        for col in group_return.columns:
+            if col in ['G1', 'G10']:
+                # 突出显示G1和G10组
+                linewidth = 3
+                alpha = 1.0
+                if col == 'G10':
+                    color = '#FF0000'  # 鲜红色
+                else:  # G1
+                    color = '#00AA00'  # 鲜绿色
+            elif col == 'Benchmark':
+                # 基准线保持可见
+                linewidth = 2
+                alpha = 0.8
+                color = '#000000'  # 黑色
+            else:
+                # 弱化其他组
+                linewidth = 1
+                alpha = 0.3
+                color = '#CCCCCC'  # 浅灰色
+            
+            ax.plot(group_return.index, group_return[col], 
+                   label=col, linewidth=linewidth, alpha=alpha, color=color)
+        
+        ax.set_title(f"{name}_分层净值表现")
+        ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", ncol=1, fontsize=8)
+        ax.grid(True, alpha=0.3)
 
+        
+        
+        # 年化收益图
         yby_performance = (
             group_return.pct_change()
             .resample("Y")
@@ -826,18 +869,49 @@ def factor_layered_backtest(df, n, g, index_item, name="", rebalance=False):
         )
         yby_performance -= yby_performance.loc["Benchmark"]
         yby_performance = yby_performance.replace(0, np.nan).dropna(how="all")
-        yby_performance.plot(
+
+        # 根据年份数量动态生成颜色
+        num_years = len(yby_performance.columns)
+        
+        # 基础高对比度颜色方案
+        base_colors = [
+            "#1f77b4",  # 蓝色
+            "#ff7f0e",  # 橙色
+            "#2ca02c",  # 绿色
+            "#d62728",  # 红色
+            "#9467bd",  # 紫色
+            "#8c564b",  # 棕色
+            "#e377c2",  # 粉色
+            "#7f7f7f",  # 灰色
+            "#bcbd22",  # 橄榄色
+            "#000080",  # 深蓝色
+            "#FF1493",  # 深粉色
+            "#00CED1",  # 暗青色
+            "#FF4500",  # 橙红色
+            "#32CD32",  # 酸橙绿
+            "#8A2BE2",  # 蓝紫色
+            "#DC143C",  # 深红色
+            "#00BFFF",  # 深天蓝
+            "#FFD700",  # 金色
+            "#FF69B4",  # 热粉色
+            "#228B22",  # 森林绿
+        ]
+        
+        # 如果年份数量超过基础颜色数量，使用matplotlib的颜色循环
+        if num_years > len(base_colors):
+            colors = [plt.cm.tab20(i / num_years) for i in range(num_years)]
+        else:
+            colors = base_colors[:num_years]
+
+        # 逐年分层年化收益图 
+        ax = yby_performance.plot(
             kind="bar",
-            figsize=(10, 5),
+            figsize=(12, 6),
             title=f"{name}_逐年分层年化收益",
-            color=[
-                "powderblue",
-                "lightskyblue",
-                "cornflowerblue",
-                "steelblue",
-                "royalblue",
-            ],
+            color=colors[: len(yby_performance.columns)],
         )
+        # 设置图例为水平排列，位置在图下方
+        ax.legend(bbox_to_anchor=(0.5, -0.15), loc="upper center", ncol=5, fontsize=9)
 
     return group_return, turnover_ratio
 

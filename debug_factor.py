@@ -24,15 +24,15 @@ if __name__ == "__main__":
         "raw",
         f"{factor_name}_{index_item}_{start_date}_{end_date}.pkl",
     )
-    neu_path = os.path.join(
+    processed_path = os.path.join(
         current_dir,
         "factor_lib",
-        "neu",
+        "processed",
         f"{factor_name}_{index_item}_{start_date}_{end_date}.pkl",
     )
 
     try:
-        factor_clean = pd.read_pickle(neu_path)
+        factor_clean = pd.read_pickle(processed_path)
 
     except:
         factor_definition = Factor(
@@ -40,12 +40,7 @@ if __name__ == "__main__":
         ) / Factor("total_assets_ttm_0")
         raw_factor = execute_factor(factor_definition, stock_list, start_date, end_date)
         factor_clean = data_clean(raw_factor, stock_universe, index_item)
-    # 计算IC
-    # ic, performance = calc_ic(factor_clean, change_day, index_item, factor_name)
 
-    # group_return, turnover_ratio = group_g(
-    #     factor_clean, change_day, 10, index_item, factor_name
-    # )
 
     return_group_hold, _ = factor_layered_backtest(
         factor_clean, change_day, 10, index_item, name=factor_name
