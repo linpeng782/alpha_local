@@ -369,7 +369,7 @@ def calc_ic(df, n, index_item, name="", Rank_IC=True):
         "name": name,
         "change_day": n,
         "IC mean": round(result.mean(), 4),
-        "IC std": round(result.std(), 4),
+        # "IC std": round(result.std(), 4),
         "ICIR": round(result.mean() / result.std(), 4),
         "IC>0": round(len(result[result > 0].dropna()) / len(result), 4),
         "ABS_IC>2%": round(len(result[abs(result) > 0.02].dropna()) / len(result), 4),
@@ -552,7 +552,7 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
 
     # 净值表现图 - 优化图例显示
     ax = group_return.plot(figsize=(10, 5), title=f"{name}_分层净值表现")
-    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', ncol=1, fontsize=8)
+    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", ncol=1, fontsize=8)
 
     yby_performance = (
         group_return.pct_change()
@@ -562,30 +562,30 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
     )
     yby_performance -= yby_performance.loc["Benchmark"]
     yby_performance = yby_performance.replace(0, np.nan).dropna(how="all")
-    
+
     # 定义丰富的颜色调色板
     colors = [
-        '#FF6B6B',  # 珊瑚红
-        '#4ECDC4',  # 青绿色
-        '#45B7D1',  # 天蓝色
-        '#96CEB4',  # 薄荷绿
-        '#FFEAA7',  # 浅黄色
-        '#DDA0DD',  # 梅花色
-        '#98D8C8',  # 薄荷蓝
-        '#F7DC6F',  # 金黄色
-        '#BB8FCE',  # 淡紫色
-        '#85C1E9',  # 浅蓝色
+        "#FF6B6B",  # 珊瑚红
+        "#4ECDC4",  # 青绿色
+        "#45B7D1",  # 天蓝色
+        "#96CEB4",  # 薄荷绿
+        "#FFEAA7",  # 浅黄色
+        "#DDA0DD",  # 梅花色
+        "#98D8C8",  # 薄荷蓝
+        "#F7DC6F",  # 金黄色
+        "#BB8FCE",  # 淡紫色
+        "#85C1E9",  # 浅蓝色
     ]
-    
+
     # 逐年分层年化收益图 - 优化颜色和图例
     ax = yby_performance.plot(
         kind="bar",
         figsize=(12, 6),
         title=f"{name}_逐年分层年化收益",
-        color=colors[:len(yby_performance.columns)],
+        color=colors[: len(yby_performance.columns)],
     )
     # 设置图例为水平排列，位置在图下方
-    ax.legend(bbox_to_anchor=(0.5, -0.15), loc='upper center', ncol=5, fontsize=9)
+    ax.legend(bbox_to_anchor=(0.5, -0.15), loc="upper center", ncol=5, fontsize=9)
 
     return group_return, turnover_ratio
 
@@ -633,6 +633,48 @@ def preprocess_factor(factor, stock_universe, index_item):
 
     # 中性化处理
     factor = neutralization_vectorized(factor, stock_list)
+
+    # 涨停过滤
+    limit_up_filter = get_limit_up_filter(stock_list, date_list)
+    factor = factor.mask(limit_up_filter)
+
+    return factor
+
+
+# 数据清洗封装函数
+def preprocess_factor_without_neutralization(factor, stock_universe, index_item):
+
+    stock_list = stock_universe.columns.tolist()
+    date_list = stock_universe.index.tolist()
+    start_date = date_list[0].strftime("%F")
+    end_date = date_list[-1].strftime("%F")
+
+    try:
+        combo_mask = pd.read_pickle(
+            f"factor_lib/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
+        )
+    except:
+        #  新股过滤
+        new_stock_filter = get_new_stock_filter(stock_list, date_list)
+        # st过滤
+        st_filter = get_st_filter(stock_list, date_list)
+        # 停牌过滤
+        suspended_filter = get_suspended_filter(stock_list, date_list)
+
+        combo_mask = (
+            new_stock_filter.astype(int)
+            + st_filter.astype(int)
+            + suspended_filter.astype(int)
+            + (~stock_universe).astype(int)
+        ) == 0
+
+        os.makedirs("factor_lib", exist_ok=True)
+        combo_mask.to_pickle(
+            f"factor_lib/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
+        )
+
+    # axis=1,过滤掉所有日期截面都是nan的股票
+    factor = factor.mask(~combo_mask).dropna(axis=1, how="all")
 
     # 涨停过滤
     limit_up_filter = get_limit_up_filter(stock_list, date_list)
@@ -705,7 +747,7 @@ def factor_layered_backtest(df, n, g, index_item, name="", rebalance=False):
         current_factors = factor_data.loc[date, "factor"]
 
         # 使用qcut进行分组
-        groups = pd.qcut(current_factors, g, labels=range(1, g + 1))  
+        groups = pd.qcut(current_factors, g, labels=range(1, g + 1))
         current_groups = (
             current_factors.groupby(groups).apply(lambda x: x.index.tolist()).to_dict()
         )
@@ -746,7 +788,7 @@ def factor_layered_backtest(df, n, g, index_item, name="", rebalance=False):
     for i, start_date in enumerate(actual_rebalance_dates):
 
         # 确定周期结束日期
-        is_last_period = (i == len(actual_rebalance_dates) - 1)
+        is_last_period = i == len(actual_rebalance_dates) - 1
 
         if not is_last_period:
             # 正常周期：到下一个调仓日
@@ -829,37 +871,41 @@ def factor_layered_backtest(df, n, g, index_item, name="", rebalance=False):
 
         # 净值表现图 - 突出G1和G10组，弱化其他组
         fig, ax = plt.subplots(figsize=(10, 5))
-        
+
         # 绘制所有组的线条
         for col in group_return.columns:
-            if col in ['G1', 'G10']:
+            if col in ["G1", "G10"]:
                 # 突出显示G1和G10组
                 linewidth = 3
                 alpha = 1.0
-                if col == 'G10':
-                    color = '#FF0000'  # 鲜红色
+                if col == "G10":
+                    color = "#FF0000"  # 鲜红色
                 else:  # G1
-                    color = '#00AA00'  # 鲜绿色
-            elif col == 'Benchmark':
+                    color = "#00AA00"  # 鲜绿色
+            elif col == "Benchmark":
                 # 基准线保持可见
                 linewidth = 2
                 alpha = 0.8
-                color = '#000000'  # 黑色
+                color = "#000000"  # 黑色
             else:
                 # 弱化其他组
                 linewidth = 1
                 alpha = 0.3
-                color = '#CCCCCC'  # 浅灰色
-            
-            ax.plot(group_return.index, group_return[col], 
-                   label=col, linewidth=linewidth, alpha=alpha, color=color)
-        
+                color = "#CCCCCC"  # 浅灰色
+
+            ax.plot(
+                group_return.index,
+                group_return[col],
+                label=col,
+                linewidth=linewidth,
+                alpha=alpha,
+                color=color,
+            )
+
         ax.set_title(f"{name}_分层净值表现")
         ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", ncol=1, fontsize=8)
         ax.grid(True, alpha=0.3)
 
-        
-        
         # 年化收益图
         yby_performance = (
             group_return.pct_change()
@@ -872,7 +918,7 @@ def factor_layered_backtest(df, n, g, index_item, name="", rebalance=False):
 
         # 根据年份数量动态生成颜色
         num_years = len(yby_performance.columns)
-        
+
         # 基础高对比度颜色方案
         base_colors = [
             "#1f77b4",  # 蓝色
@@ -896,14 +942,14 @@ def factor_layered_backtest(df, n, g, index_item, name="", rebalance=False):
             "#FF69B4",  # 热粉色
             "#228B22",  # 森林绿
         ]
-        
+
         # 如果年份数量超过基础颜色数量，使用matplotlib的颜色循环
         if num_years > len(base_colors):
             colors = [plt.cm.tab20(i / num_years) for i in range(num_years)]
         else:
             colors = base_colors[:num_years]
 
-        # 逐年分层年化收益图 
+        # 逐年分层年化收益图
         ax = yby_performance.plot(
             kind="bar",
             figsize=(12, 6),
@@ -1233,6 +1279,9 @@ def get_performance_analysis(account_result, rf=0.03, benchmark_index="000985.XS
         252 / len(performance_cumnet)
     ) - 1
 
+    # 策略年化收益(算术)
+    Strategy_Annualized_Return_AM = performance_pct[strategy_name].mean() * 252
+
     # 基准收益
     Benchmark_Final_Return = performance_cumnet[benchmark_name].iloc[-1] - 1
 
@@ -1258,6 +1307,9 @@ def get_performance_analysis(account_result, rf=0.03, benchmark_index="000985.XS
     # 夏普
     Strategy_Sharpe = (Strategy_Annualized_Return_EAR - rf) / Strategy_Volatility
 
+    # 夏普(算术)
+    Strategy_Sharpe_AM = (Strategy_Annualized_Return_AM - rf) / Strategy_Volatility
+
     # 下行波动率
     strategy_ret = performance_pct[strategy_name]
     Strategy_Down_Volatility = strategy_ret[strategy_ret < 0].std() * np.sqrt(252)
@@ -1275,7 +1327,7 @@ def get_performance_analysis(account_result, rf=0.03, benchmark_index="000985.XS
         Strategy_Annualized_Return_EAR - Benchmark_Annualized_Return_EAR
     ) / Tracking_Error
 
-    # 最大回测
+    # 最大回撤
     i = np.argmax(
         (
             np.maximum.accumulate(performance_cumnet[strategy_name])
@@ -1305,7 +1357,7 @@ def get_performance_analysis(account_result, rf=0.03, benchmark_index="000985.XS
     # 超额夏普
     Alpha_Sharpe = (Alpha_Annualized_Return_EAR - rf) / Alpha_Volatility
 
-    # 超额最大回测
+    # 超额最大回撤
     i = np.argmax(
         (
             np.maximum.accumulate(performance_cumnet[alpha_name])
@@ -1329,12 +1381,14 @@ def get_performance_analysis(account_result, rf=0.03, benchmark_index="000985.XS
     result = {
         "策略累计收益": round(Strategy_Final_Return, 4),
         "策略年化收益": round(Strategy_Annualized_Return_EAR, 4),
+        "策略年化收益(算术)": round(Strategy_Annualized_Return_AM, 4),
         "基准累计收益": round(Benchmark_Final_Return, 4),
         "基准年化收益": round(Benchmark_Annualized_Return_EAR, 4),
         "阿尔法": round(Alpha, 4),
         "贝塔": round(Beta, 4),
         "波动率": round(Strategy_Volatility, 4),
         "夏普比率": round(Strategy_Sharpe, 4),
+        "夏普比率(算术)": round(Strategy_Sharpe_AM, 4),
         "下行波动率": round(Strategy_Down_Volatility, 4),
         "索提诺比率": round(Sortino, 4),
         "跟踪误差": round(Tracking_Error, 4),

@@ -1,6 +1,12 @@
 import scipy as sp
 import numpy as np
 import pandas as pd
+import sys
+import os
+
+# 添加core目录到路径
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'core'))
+from factor_processing_utils import *
 from scipy import stats
 import statsmodels.api as sm
 from pathlib import Path
