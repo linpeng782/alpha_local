@@ -1,6 +1,7 @@
 import sys
 import os
-sys.path.insert(0, '/Users/didi/KDCJ')
+
+sys.path.insert(0, "/Users/didi/KDCJ")
 from factor_utils import *
 import pandas as pd
 
@@ -18,31 +19,25 @@ if __name__ == "__main__":
     date_list = stock_universe.index.tolist()
     factor_name = "market_cap"
 
-    # 使用os.path.join处理路径
-    # current_dir = os.path.dirname(os.path.abspath(__file__))
-    # raw_path = os.path.join(
-    #     current_dir,
-    #     "factor_lib",
-    #     "raw",
-    #     f"{factor_name}_{index_item}_{start_date}_{end_date}.pkl",
-    # )
-    # processed_path = os.path.join(
-    #     current_dir,
-    #     "factor_lib",
-    #     "processed",
-    #     f"{factor_name}_{index_item}_{start_date}_{end_date}.pkl",
-    # )
-
     factor_definition = Factor(factor_name)
     print("计算因子...")
-    raw_factor = execute_factor(factor_definition, stock_list, start_date, end_date) * -1
+    raw_factor = (
+        execute_factor(factor_definition, stock_list, start_date, end_date) * -1
+    )
     raw_factor.index.names = ["datetime"]
+
+    # 因子清洗带中性化
+    # processed_factor = preprocess_factor(
+    #     raw_factor, stock_universe, index_item
+    # )
+
+    # 因子清洗不带中性化
     processed_factor = preprocess_factor_without_neutralization(
         raw_factor, stock_universe, index_item
     )
 
     ic, ic_report = calc_ic(processed_factor, change_days, index_item, factor_name)
-    print(ic_report)
+    
 
     return_group_hold, _ = factor_layered_backtest(
         processed_factor, change_days, group_num, index_item, name=factor_name
@@ -55,4 +50,15 @@ if __name__ == "__main__":
     performance_cumnet, result = get_performance_analysis(
         account_result, benchmark_index=index_item
     )
-    
+
+    # 使用统一的路径管理函数
+    raw_path = get_data_path(
+        "factor_raw", 
+        filename=f"{factor_name}_{index_item}_{start_date}_{end_date}.pkl"
+    )
+    processed_path = get_data_path(
+        "factor_processed", 
+        filename=f"{factor_name}_{index_item}_{start_date}_{end_date}.pkl"
+    )
+    raw_factor.to_pickle(raw_path)
+    processed_factor.to_pickle(processed_path)

@@ -15,7 +15,7 @@ from factor_processing_utils import *
 
 
 class FactorDatabaseBuilder:
-    def __init__(self, cache_dir="factor_lib"):
+    def __init__(self, cache_dir="../data/factor_lib"):
         """
         初始化因子数据库构建器
 

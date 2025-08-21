@@ -18,6 +18,116 @@ from tqdm import *
 
 import matplotlib.pyplot as plt
 
+
+# ==================== 数据路径管理 ====================
+
+def get_data_path(data_type, filename=None, auto_create=True, **kwargs):
+    """
+    统一的数据路径管理函数
+    
+    参数:
+        data_type: 数据类型
+            - 'combo_mask': 组合掩码数据 -> data/cache/combo_masks/
+            - 'return_1d': 日收益率数据 -> data/cache/returns/
+            - 'industry_market': 行业市值数据 -> data/cache/industry/
+            - 'open_price': 开盘价数据 -> data/cache/market_data/
+            - 'factor_raw': 原始因子数据 -> data/factor_lib/raw/
+            - 'factor_processed': 处理后因子数据 -> data/factor_lib/processed/
+        filename: 文件名（可选，如果不提供则根据kwargs自动生成）
+        auto_create: 是否自动创建目录
+        **kwargs: 用于生成文件名的参数
+    
+    返回:
+        完整的文件路径
+    """
+    
+    # 路径映射
+    path_mapping = {
+        'combo_mask': 'data/cache/combo_masks',
+        'return_1d': 'data/cache/returns',
+        'industry_market': 'data/cache/industry', 
+        'open_price': 'data/cache/market_data',
+        'factor_raw': 'data/factor_lib/raw',
+        'factor_processed': 'data/factor_lib/processed'
+    }
+    
+    # 文件名模板
+    filename_templates = {
+        'combo_mask': "combo_mask_{index_item}_{start_date}_{end_date}.pkl",
+        'return_1d': "return_1d_{index_item}_{start}_{end}.pkl",
+        'industry_market': "df_industry_market_{industry_type}_{index_item}_{start}_{end}.pkl",
+        'open_price': "open_{index_item}_{start}_{end}.pkl"
+    }
+    
+    if data_type not in path_mapping:
+        raise ValueError(f"不支持的数据类型: {data_type}。支持的类型: {list(path_mapping.keys())}")
+    
+    # 生成文件名
+    if filename is None:
+        if data_type in filename_templates:
+            filename = filename_templates[data_type].format(**kwargs)
+        else:
+            raise ValueError(f"数据类型 {data_type} 需要提供 filename 参数")
+    
+    # 智能路径解析：如果当前在scripts目录，则返回上级目录
+    current_dir = os.getcwd()
+    if current_dir.endswith('/scripts') or current_dir.endswith('\\scripts'):
+        # 从 scripts 目录调用，需要返回上级目录
+        base_path = os.path.join('..', path_mapping[data_type])
+    else:
+        # 从其他目录调用，使用相对路径
+        base_path = path_mapping[data_type]
+    
+    # 构建完整路径
+    full_path = os.path.join(base_path, filename)
+    
+    # 自动创建目录
+    if auto_create:
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+    
+    return full_path
+
+
+def migrate_file_to_new_structure(old_path, data_type, **kwargs):
+    """
+    将文件从旧路径迁移到新路径结构
+    
+    参数:
+        old_path: 旧文件路径
+        data_type: 新的数据类型
+        **kwargs: 用于生成新文件名的参数
+    """
+    if os.path.exists(old_path):
+        new_path = get_data_path(data_type, **kwargs)
+        if not os.path.exists(new_path):
+            import shutil
+            shutil.move(old_path, new_path)
+            print(f"文件已迁移: {old_path} -> {new_path}")
+        return new_path
+    return None
+
+
+def load_or_create_data(data_type, create_func, **kwargs):
+    """
+    简化的数据加载函数：尝试加载，如果不存在则创建
+    
+    参数:
+        data_type: 数据类型
+        create_func: 创建数据的函数
+        **kwargs: 用于生成文件名的参数
+    
+    返回:
+        加载或创建的数据
+    """
+    data_path = get_data_path(data_type, **kwargs)
+    
+    try:
+        return pd.read_pickle(data_path)
+    except:
+        data = create_func()
+        data.to_pickle(data_path)
+        return data
+
 plt.rcParams["font.sans-serif"] = [
     "Arial Unicode MS",
     "PingFang SC",
@@ -268,12 +378,34 @@ def neutralization_vectorized(
     start = datetime_period[0].strftime("%F")
     end = datetime_period[-1].strftime("%F")
 
+    # 尝试从新路径读取industry_market数据
+    new_path = get_data_path('industry_market', 
+                            industry_type=industry_type,
+                            index_item=index_item, 
+                            start=start, 
+                            end=end)
+    legacy_path = get_legacy_path(f"df_industry_market_{industry_type}_{index_item}_{start}_{end}.pkl")
+    
+    df_industry_market = None
+    
+    # 优先尝试新路径
     try:
-        # 获取存储数据
-        df_industry_market = pd.read_pickle(
-            f"factor_lib/df_industry_market_{industry_type}_{index_item}_{start}_{end}.pkl"
-        )
+        df_industry_market = pd.read_pickle(new_path)
+        print(f"✅ 从新路径加载industry_market: {new_path}")
     except:
+        # 尝试旧路径
+        try:
+            df_industry_market = pd.read_pickle(legacy_path)
+            print(f"⚠️  从旧路径加载industry_market: {legacy_path}")
+            # 自动迁移到新路径
+            df_industry_market.to_pickle(new_path)
+            print(f"✅ 已迁移industry_market到新路径: {new_path}")
+        except:
+            print(f"📝 计算新的industry_market...")
+            pass
+    
+    # 如果都没有找到，则重新计算
+    if df_industry_market is None:
         # 获取市值暴露度
         market_cap = (
             execute_factor(LOG(Factor("market_cap_3")), order_book_ids, start, end)
@@ -289,10 +421,10 @@ def neutralization_vectorized(
         df_industry_market = industry_df
         df_industry_market.index.names = ["datetime", "order_book_id"]
         df_industry_market.dropna(axis=0, inplace=True)
-        os.makedirs("factor_lib", exist_ok=True)
-        df_industry_market.to_pickle(
-            f"factor_lib/df_industry_market_{industry_type}_{index_item}_{start}_{end}.pkl"
-        )
+        
+        # 保存到新路径
+        df_industry_market.to_pickle(new_path)
+        print(f"💾 industry_market已保存到: {new_path}")
 
     df_industry_market["factor"] = factor.stack()
     df_industry_market.dropna(subset="factor", inplace=True)
@@ -330,13 +462,30 @@ def calc_ic(df, n, index_item, name="", Rank_IC=True):
     start = datetime_period.min().strftime("%F")
     end = datetime_period.max().strftime("%F")
 
-    # 提取预存储数据
+    # 尝试从新路径读取open_price数据
+    new_path = get_data_path('open_price', index_item=index_item, start=start, end=end)
+    legacy_path = get_legacy_path(f"open_{index_item}_{start}_{end}.pkl")
+    
+    open = None
+    
+    # 优先尝试新路径
     try:
-        # 开盘价
-        open = pd.read_pickle(f"factor_lib/open_{index_item}_{start}_{end}.pkl")
+        open = pd.read_pickle(new_path)
+        print(f"✅ 从新路径加载open_price: {new_path}")
     except:
-        # 新建预存储文档
-        os.makedirs("factor_lib", exist_ok=True)
+        # 尝试旧路径
+        try:
+            open = pd.read_pickle(legacy_path)
+            print(f"⚠️  从旧路径加载open_price: {legacy_path}")
+            # 自动迁移到新路径
+            open.to_pickle(new_path)
+            print(f"✅ 已迁移open_price到新路径: {new_path}")
+        except:
+            print(f"📝 计算新的open_price...")
+            pass
+    
+    # 如果都没有找到，则重新计算
+    if open is None:
         # 拿一个完整的券池表格，防止有些股票在某些日期没有数据，导致缓存数据不全，影响其他因子计算
         index_fix = INDEX_FIX(start, end, index_item)
         order_book_ids = index_fix.columns.tolist()
@@ -349,8 +498,10 @@ def calc_ic(df, n, index_item, name="", Rank_IC=True):
             frequency="1d",
             fields="open",
         ).open.unstack("order_book_id")
-        # 存储
-        open.to_pickle(f"factor_lib/open_{index_item}_{start}_{end}.pkl")
+        
+        # 保存到新路径
+        open.to_pickle(new_path)
+        print(f"💾 open_price已保存到: {new_path}")
 
     # 未来一段收益股票的累计收益率计算
     return_n = open.pct_change(n).shift(-n - 1)
@@ -406,14 +557,30 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
     end = datetime_period.max().strftime("%F")
 
     # 提取预存储数据
+    # 尝试从新路径读取return_1d数据
+    new_path = get_data_path('return_1d', index_item=index_item, start=start, end=end)
+    legacy_path = get_legacy_path(f"return_1d_{index_item}_{start}_{end}.pkl")
+    
+    return_1d = None
+    
+    # 优先尝试新路径
     try:
-        # 未来一天收益率
-        return_1d = pd.read_pickle(
-            f"factor_lib/return_1d_{index_item}_{start}_{end}.pkl"
-        )
+        return_1d = pd.read_pickle(new_path)
+        print(f"✅ 从新路径加载return_1d: {new_path}")
     except:
-        # 新建预存储文档
-        os.makedirs("factor_lib", exist_ok=True)
+        # 尝试旧路径
+        try:
+            return_1d = pd.read_pickle(legacy_path)
+            print(f"⚠️  从旧路径加载return_1d: {legacy_path}")
+            # 自动迁移到新路径
+            return_1d.to_pickle(new_path)
+            print(f"✅ 已迁移return_1d到新路径: {new_path}")
+        except:
+            print(f"📝 计算新的return_1d...")
+            pass
+    
+    # 如果都没有找到，则重新计算
+    if return_1d is None:
         # 拿一个完整的券池表格，防止有些股票在某些日期没有数据，导致缓存数据不全，影响其他因子计算
         index_fix = INDEX_FIX(start, end, index_item)
         order_book_ids = index_fix.columns.tolist()
@@ -429,8 +596,10 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
             True,
         ).open.unstack("order_book_id")
         return_1d = open.pct_change().shift(-1).dropna(axis=0, how="all").stack()
-        # 存储
-        return_1d.to_pickle(f"factor_lib/return_1d_{index_item}_{start}_{end}.pkl")
+        
+        # 保存到新路径
+        return_1d.to_pickle(new_path)
+        print(f"💾 return_1d已保存到: {new_path}")
 
     # 数据和收益合并
     group = df.stack().to_frame("factor")
@@ -590,7 +759,7 @@ def group_g(df, n, g, index_item, name="", rebalance=False):
     return group_return, turnover_ratio
 
 
-# 数据清洗封装函数
+# 数据清洗封装函数：券池清洗、离群值处理、标准化处理、中性化处理、涨停过滤
 def preprocess_factor(factor, stock_universe, index_item):
 
     stock_list = stock_universe.columns.tolist()
@@ -598,11 +767,33 @@ def preprocess_factor(factor, stock_universe, index_item):
     start_date = date_list[0].strftime("%F")
     end_date = date_list[-1].strftime("%F")
 
+    # 尝试从新路径读取combo_mask
+    new_path = get_data_path('combo_mask', 
+                            index_item=index_item, 
+                            start_date=start_date, 
+                            end_date=end_date)
+    legacy_path = get_legacy_path(f"combo_mask_{index_item}_{start_date}_{end_date}.pkl")
+    
+    combo_mask = None
+    
+    # 优先尝试新路径
     try:
-        combo_mask = pd.read_pickle(
-            f"factor_lib/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
-        )
+        combo_mask = pd.read_pickle(new_path)
+        print(f"✅ 从新路径加载combo_mask: {new_path}")
     except:
+        # 尝试旧路径
+        try:
+            combo_mask = pd.read_pickle(legacy_path)
+            print(f"⚠️  从旧路径加载combo_mask: {legacy_path}")
+            # 自动迁移到新路径
+            combo_mask.to_pickle(new_path)
+            print(f"✅ 已迁移combo_mask到新路径: {new_path}")
+        except:
+            print(f"📝 计算新的combo_mask...")
+            pass
+    
+    # 如果都没有找到，则重新计算
+    if combo_mask is None:
         #  新股过滤
         new_stock_filter = get_new_stock_filter(stock_list, date_list)
         # st过滤
@@ -617,10 +808,9 @@ def preprocess_factor(factor, stock_universe, index_item):
             + (~stock_universe).astype(int)
         ) == 0
 
-        os.makedirs("factor_lib", exist_ok=True)
-        combo_mask.to_pickle(
-            f"factor_lib/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
-        )
+        # 保存到新路径
+        combo_mask.to_pickle(new_path)
+        print(f"💾 combo_mask已保存到: {new_path}")
 
     # axis=1,过滤掉所有日期截面都是nan的股票
     factor = factor.mask(~combo_mask).dropna(axis=1, how="all")
@@ -641,7 +831,7 @@ def preprocess_factor(factor, stock_universe, index_item):
     return factor
 
 
-# 数据清洗封装函数
+# 数据清洗封装函数：券池清洗、涨停过滤
 def preprocess_factor_without_neutralization(factor, stock_universe, index_item):
 
     stock_list = stock_universe.columns.tolist()
@@ -649,11 +839,33 @@ def preprocess_factor_without_neutralization(factor, stock_universe, index_item)
     start_date = date_list[0].strftime("%F")
     end_date = date_list[-1].strftime("%F")
 
+    # 尝试从新路径读取combo_mask
+    new_path = get_data_path('combo_mask', 
+                            index_item=index_item, 
+                            start_date=start_date, 
+                            end_date=end_date)
+    legacy_path = get_legacy_path(f"combo_mask_{index_item}_{start_date}_{end_date}.pkl")
+    
+    combo_mask = None
+    
+    # 优先尝试新路径
     try:
-        combo_mask = pd.read_pickle(
-            f"factor_lib/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
-        )
+        combo_mask = pd.read_pickle(new_path)
+        print(f"✅ 从新路径加载combo_mask: {new_path}")
     except:
+        # 尝试旧路径
+        try:
+            combo_mask = pd.read_pickle(legacy_path)
+            print(f"⚠️  从旧路径加载combo_mask: {legacy_path}")
+            # 自动迁移到新路径
+            combo_mask.to_pickle(new_path)
+            print(f"✅ 已迁移combo_mask到新路径: {new_path}")
+        except:
+            print(f"📝 计算新的combo_mask...")
+            pass
+    
+    # 如果都没有找到，则重新计算
+    if combo_mask is None:
         #  新股过滤
         new_stock_filter = get_new_stock_filter(stock_list, date_list)
         # st过滤
@@ -668,10 +880,9 @@ def preprocess_factor_without_neutralization(factor, stock_universe, index_item)
             + (~stock_universe).astype(int)
         ) == 0
 
-        os.makedirs("factor_lib", exist_ok=True)
-        combo_mask.to_pickle(
-            f"factor_lib/combo_mask_{index_item}_{start_date}_{end_date}.pkl"
-        )
+        # 保存到新路径
+        combo_mask.to_pickle(new_path)
+        print(f"💾 combo_mask已保存到: {new_path}")
 
     # axis=1,过滤掉所有日期截面都是nan的股票
     factor = factor.mask(~combo_mask).dropna(axis=1, how="all")
@@ -706,12 +917,30 @@ def factor_layered_backtest(df, n, g, index_item, name="", rebalance=False):
     start = datetime_period.min().strftime("%F")
     end = datetime_period.max().strftime("%F")
 
+    # 尝试从新路径读取return_1d
+    new_path = get_data_path('return_1d', index_item=index_item, start=start, end=end)
+    legacy_path = get_legacy_path(f"return_1d_{index_item}_{start}_{end}.pkl")
+    
+    return_1d = None
+    
+    # 优先尝试新路径
     try:
-        return_1d = pd.read_pickle(
-            f"factor_lib/return_1d_{index_item}_{start}_{end}.pkl"
-        )
+        return_1d = pd.read_pickle(new_path)
+        print(f"✅ 从新路径加载return_1d: {new_path}")
     except:
-        os.makedirs("factor_lib", exist_ok=True)
+        # 尝试旧路径
+        try:
+            return_1d = pd.read_pickle(legacy_path)
+            print(f"⚠️  从旧路径加载return_1d: {legacy_path}")
+            # 自动迁移到新路径
+            return_1d.to_pickle(new_path)
+            print(f"✅ 已迁移return_1d到新路径: {new_path}")
+        except:
+            print(f"📝 计算新的return_1d...")
+            pass
+    
+    # 如果都没有找到，则重新计算
+    if return_1d is None:
         index_fix = INDEX_FIX(start, end, index_item)
         order_book_ids = index_fix.columns.tolist()
         open = get_price(
@@ -725,7 +954,10 @@ def factor_layered_backtest(df, n, g, index_item, name="", rebalance=False):
             True,
         ).open.unstack("order_book_id")
         return_1d = open.pct_change().shift(-1).dropna(axis=0, how="all").stack()
-        return_1d.to_pickle(f"factor_lib/return_1d_{index_item}_{start}_{end}.pkl")
+        
+        # 保存到新路径
+        return_1d.to_pickle(new_path)
+        print(f"💾 return_1d已保存到: {new_path}")
 
     # 数据合并，使用multiindex
     factor_data = df.stack().to_frame("factor")
