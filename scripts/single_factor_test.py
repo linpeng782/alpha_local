@@ -11,6 +11,7 @@ if __name__ == "__main__":
     input_start_date = "2015-01-01"
     input_end_date = "2025-07-01"
     index_item = "000985.XSHG"
+    neutralize = False
 
     change_days = 20
     group_num = 10
@@ -33,15 +34,14 @@ if __name__ == "__main__":
     )
     raw_factor.index.names = ["datetime"]
 
-    # 因子清洗带中性化
-    # processed_factor = preprocess_factor(
-    #     raw_factor, stock_universe, index_item
-    # )
-
-    # 因子清洗不带中性化
-    processed_factor = preprocess_factor_without_neutralization(
-        raw_factor, stock_universe, index_item
-    )
+    if neutralize:
+        # 因子清洗带中性化
+        processed_factor = preprocess_factor(raw_factor, stock_universe, index_item)
+    else:
+        # 因子清洗不带中性化
+        processed_factor = preprocess_factor_without_neutralization(
+            raw_factor, stock_universe, index_item
+        )
 
     # 计算IC
     ic, ic_report = calc_ic(processed_factor, change_days, index_item, factor_name)
@@ -63,10 +63,10 @@ if __name__ == "__main__":
     account_result = backtest(df_weight)
     # 绩效分析并保存策略报告
     performance_cumnet, result = get_performance_analysis(
-        account_result, 
+        account_result,
         benchmark_index=index_item,
         factor_name=factor_name,
-        stock_universe=stock_universe
+        stock_universe=stock_universe,
     )
 
     # 使用统一的路径管理函数
@@ -74,9 +74,11 @@ if __name__ == "__main__":
         "factor_raw",
         filename=f"{factor_name}_{index_item}_{actual_start_date}_{actual_end_date}.pkl",
     )
+    print(f"raw_factor已保存到: {raw_path}")
     processed_path = get_data_path(
         "factor_processed",
         filename=f"{factor_name}_{index_item}_{actual_start_date}_{actual_end_date}.pkl",
     )
+    print(f"processed_factor已保存到: {processed_path}")
     raw_factor.to_pickle(raw_path)
     processed_factor.to_pickle(processed_path)
