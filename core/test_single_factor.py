@@ -127,9 +127,8 @@ def factor_factory(
             factor_name=factor_name,
             stock_universe=stock_universe,
         )
-        performance_result = result
-
-        print(performance_result)
+      
+        print(result)
 
     print(f"=== 因子测试完成: {factor_name} ===\n")
 
@@ -140,14 +139,14 @@ if __name__ == "__main__":
     end_date = "2025-07-01"
     index_item = "000985.XSHG"
     rebalance_days = 20
-    run_backtest = True
+    run_backtest = False
 
     # 因子构造
     HIGH = Factor("high")
     LOW = Factor("low")
-    factor_definition = STD(HIGH / LOW, 20)
+    factor_definition = STD(HIGH / LOW, 504)
 
-    factor_name = "high_low_std"
+    factor_name = "high_low_std_504"
     direction = -1
     neutralize = True
 

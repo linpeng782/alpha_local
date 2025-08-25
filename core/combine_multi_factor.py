@@ -28,13 +28,11 @@ def load_processed_factors(factor_configs, index_item, start_date, end_date):
             # 加载因子数据
             factor_df = pd.read_pickle(file_path)
             factors_dict[factor_name] = factor_df
-            print(
-                f"✅加载因子 {factor_name} (direction={direction}, neutralize={neutralize}): {factor_df.shape}"
-            )
+            print(f"✅加载因子 {filename}")
         except FileNotFoundError:
             print(f"❌未找到因子文件: {filename}")
         except Exception as e:
-            print(f"❌加载因子 {factor_name} 失败: {e}")
+            print(f"❌加载因子 {filename} 失败: {e}")
 
     return factors_dict
 
@@ -44,11 +42,14 @@ if __name__ == "__main__":
     start_date = "2015-01-01"
     end_date = "2025-07-01"
     index_item = "000985.XSHG"
+    rebalance_days = 20
+
+    stock_universe = INDEX_FIX(start_date, end_date, index_item)
 
     # 因子配置：(factor_name, direction, neutralize)
     factor_configs = [
-        ("market_cap", -1, True),
-        ("high_low_std", -1, False),
+        ("market_cap", -1, False),
+        ("high_low_std_504", -1, True),
     ]
 
     # 加载所有因子
@@ -56,5 +57,39 @@ if __name__ == "__main__":
         factor_configs, index_item, start_date, end_date
     )
 
-    print()
-    breakpoint()
+    market_cap = factors_dict["market_cap"]
+    high_low_std = factors_dict["high_low_std_504"]
+
+    # 第一层筛选：获取最小市值的100只股票
+    market_cap_mask = market_cap.rank(axis=1, ascending=False) <= 100
+
+    # 第二层筛选：从小市值股票中筛选high_low_std最小的50只
+    # 首先将high_low_std中非小市值股票的值设为NaN
+    high_low_std_filtered = high_low_std.mask(~market_cap_mask)
+
+    # 使用ascending=False降序排名，选择排名前50的股票
+    high_low_std_mask = high_low_std_filtered.rank(axis=1, ascending=False) <= 50
+
+    # 最终筛选结果：既是小市值又是low volatility的股票
+    combo_factor = high_low_std_filtered.mask(~high_low_std_mask)
+
+    # 将非NaN的因子值转换为1，形成等权重买入列表
+    buy_list = combo_factor.notna().astype(int)
+    buy_list = buy_list.replace(0, np.nan)  # 保持稀疏矩阵结构，提高回测系统兼容性
+    # 计算每日的等权重权重矩阵
+    df_weight = buy_list.div(buy_list.sum(axis=1), axis=0)
+    df_weight = df_weight.shift(1).dropna(how="all")
+    # 执行回测
+    account_result = backtest(df_weight, rebalance_frequency=rebalance_days)
+
+    direction = -1
+    neutralize = False
+    performance_cumnet, result = get_performance_analysis(
+        account_result,
+        direction,
+        neutralize,
+        benchmark_index=index_item,
+        factor_name="combo",
+        stock_universe=stock_universe,
+    )
+    print(result)
