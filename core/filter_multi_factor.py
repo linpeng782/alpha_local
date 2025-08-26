@@ -80,7 +80,10 @@ if __name__ == "__main__":
     df_weight = buy_list.div(buy_list.sum(axis=1), axis=0)
     df_weight = df_weight.shift(1).dropna(how="all")
     # 执行回测
-    account_result = backtest(df_weight, rebalance_frequency=rebalance_days)
+    backtest_start_date = start_date
+    account_result = backtest(
+        df_weight, rebalance_frequency=rebalance_days, start_date=backtest_start_date
+    )
 
     direction = -1
     neutralize = False

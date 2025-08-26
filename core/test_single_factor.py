@@ -4,6 +4,7 @@ import os
 sys.path.insert(0, "/Users/didi/KDCJ")
 from factor_utils import *
 import pandas as pd
+from factor_research_config import get_factor_for_test
 
 
 def factor_factory(
@@ -110,7 +111,6 @@ def factor_factory(
         print(f"processed_factor已保存到: {processed_path}")
 
     # 8. 策略回测（可选）
-    performance_result = None
     if run_backtest:
         print(f"进行策略回测...")
         buy_list = get_buy_list(processed_factor, rank_n=100)
@@ -127,7 +127,7 @@ def factor_factory(
             factor_name=factor_name,
             stock_universe=stock_universe,
         )
-      
+
         print(result)
 
     print(f"=== 因子测试完成: {factor_name} ===\n")
@@ -141,19 +141,19 @@ if __name__ == "__main__":
     rebalance_days = 20
     run_backtest = False
 
-    # 因子构造
-    HIGH = Factor("high")
-    LOW = Factor("low")
-    factor_definition = STD(HIGH / LOW, 504)
+   
 
-    factor_name = "high_low_std_504"
-    direction = -1
-    neutralize = True
+    # 当前要测试的因子（修改这里来切换因子）
+    factor_name = "high_low_std_504"  # 可选: high_low_std_504, market_cap
 
-    # factor_definition = Factor("market_cap")
-    # factor_name = "market_cap"
-    # direction = -1
-    # neutralize = False
+    # 从配置文件获取因子信息
+    config = get_factor_for_test(factor_name)
+    factor_definition = config["definition"]
+    direction = config["direction"]
+    neutralize = config["neutralize"]
+
+    # 打印因子信息
+    print(f"\n正在测试因子: {factor_name}")
 
     factor_factory(
         start_date=start_date,
