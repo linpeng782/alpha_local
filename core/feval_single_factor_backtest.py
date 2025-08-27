@@ -73,7 +73,13 @@ if __name__ == "__main__":
         rebalance_frequency=rebalance_days,
         backtest_start_date=backtest_start_date,
     )
-
+    
+    
+    result_dir = "/Users/didi/KDCJ/alpha_local/data/account_result"
+    result_file = os.path.join(result_dir, "single_factor_backtest_result.pkl")
+    account_result.to_pickle(result_file)
+    print(f"✅单因子策略结果已保存到: {result_file}")
+    
     # 绩效分析并保存策略报告
     performance_cumnet, result = get_performance_analysis(
         account_result,

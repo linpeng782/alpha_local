@@ -1,5 +1,6 @@
 import sys
 import os
+import pickle
 
 sys.path.insert(0, "/Users/didi/KDCJ")
 from factor_utils import *
@@ -95,24 +96,32 @@ if __name__ == "__main__":
     df_weight.loc[january_mask] = january_data.where(january_data.isna(), 0)
     
     # 4月份空仓：年报披露集中期，小市值股票风险较大
-    april_mask = df_weight.index.month == 4
-    april_data = df_weight.loc[april_mask]
-    df_weight.loc[april_mask] = april_data.where(april_data.isna(), 0)
+    # april_mask = df_weight.index.month == 4
+    # april_data = df_weight.loc[april_mask]
+    # df_weight.loc[april_mask] = april_data.where(april_data.isna(), 0)
 
     # 执行回测
     backtest_start_date = start_date
     account_result = backtest(
-        df_weight, rebalance_frequency=rebalance_days, start_date=backtest_start_date
+        df_weight, rebalance_frequency=rebalance_days, backtest_start_date=backtest_start_date
     )
 
     direction = -1
     neutralize = False
+    
+    result_dir = "/Users/didi/KDCJ/alpha_local/data/account_result"
+    result_file = os.path.join(result_dir, "small_cap_2_factors_result.pkl")
+    account_result.to_pickle(result_file)
+    print(f"✅小市值双因子策略结果已保存到: {result_file}")
+    
     performance_cumnet, result = get_performance_analysis(
         account_result,
         direction,
         neutralize,
         benchmark_index=index_item,
         factor_name="combo",
-        stock_universe=stock_universe,
+        start_date=start_date,
+        end_date=end_date,
     )
     
+ 
