@@ -11,3 +11,4 @@ echo "__pycache__/
 database/
 *.ipynb_checkpoints/
 .DS_Store
+outputs

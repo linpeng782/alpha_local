@@ -49,7 +49,8 @@ if __name__ == "__main__":
     # 因子配置：(factor_name, direction, neutralize)
     factor_configs = [
         ("market_cap", -1, False),
-        ("high_low_std_504", -1, True),
+        ("dp_ttm", 1, True),
+        ("high_low_std_504", -1, False),
     ]
 
     # 加载所有因子
@@ -57,28 +58,47 @@ if __name__ == "__main__":
         factor_configs, index_item, start_date, end_date
     )
 
+    # 两层筛选逻辑：小市值 → 低波动率
     market_cap = factors_dict["market_cap"]
-    high_low_std = factors_dict["high_low_std_504"]
+    high_low_std_504 = factors_dict["high_low_std_504"]
+    
+    # 调试信息：查看每个因子的数据情况
+    print(f"market_cap有效数据数量: {market_cap.notna().sum(axis=1).iloc[0]}只")
+    print(f"high_low_std_504有效数据数量: {high_low_std_504.notna().sum(axis=1).iloc[0]}只")
+    
+    # 第一层筛选：从所有market_cap数据中选择最小的100只
+    small_cap_mask = market_cap.rank(axis=1, ascending=False) <= 100
+    print(f"第一层筛选后股票数量: {small_cap_mask.sum(axis=1).iloc[0]}只")
+    
+    
+    # 第二层筛选：从小市值股票中选择波动率最小的50只
+    high_low_std_filtered = high_low_std_504.mask(~small_cap_mask)
+    print(f"筛选后有效数据数量: {high_low_std_filtered.notna().sum(axis=1).iloc[-1]}只")
+    low_volatility_mask = high_low_std_filtered.rank(axis=1, ascending=False) <= 50
+    print(f"第二层筛选后股票数量: {low_volatility_mask.sum(axis=1).iloc[-1]}只")
 
-    # 第一层筛选：获取最小市值的100只股票
-    market_cap_mask = market_cap.rank(axis=1, ascending=False) <= 100
-
-    # 第二层筛选：从小市值股票中筛选high_low_std最小的50只
-    # 首先将high_low_std中非小市值股票的值设为NaN
-    high_low_std_filtered = high_low_std.mask(~market_cap_mask)
-
-    # 使用ascending=False降序排名，选择排名前50的股票
-    high_low_std_mask = high_low_std_filtered.rank(axis=1, ascending=False) <= 50
-
-    # 最终筛选结果：既是小市值又是low volatility的股票
-    combo_factor = high_low_std_filtered.mask(~high_low_std_mask)
+    # 最终筛选结果：小市值 + 低波动率的股票
+    combo_factor = high_low_std_filtered.mask(~low_volatility_mask)
 
     # 将非NaN的因子值转换为1，形成等权重买入列表
     buy_list = combo_factor.notna().astype(int)
     buy_list = buy_list.replace(0, np.nan)  # 保持稀疏矩阵结构，提高回测系统兼容性
+
     # 计算每日的等权重权重矩阵
     df_weight = buy_list.div(buy_list.sum(axis=1), axis=0)
     df_weight = df_weight.shift(1).dropna(how="all")
+
+    # 添加1月份和4月份空仓逻辑：小市值策略在这两个月份容易受财报披露和机构调仓影响
+    # 1月份空仓：年报预告和机构调仓期
+    january_mask = df_weight.index.month == 1
+    january_data = df_weight.loc[january_mask]
+    df_weight.loc[january_mask] = january_data.where(january_data.isna(), 0)
+    
+    # 4月份空仓：年报披露集中期，小市值股票风险较大
+    april_mask = df_weight.index.month == 4
+    april_data = df_weight.loc[april_mask]
+    df_weight.loc[april_mask] = april_data.where(april_data.isna(), 0)
+
     # 执行回测
     backtest_start_date = start_date
     account_result = backtest(
@@ -95,4 +115,4 @@ if __name__ == "__main__":
         factor_name="combo",
         stock_universe=stock_universe,
     )
-    print(result)
+    
