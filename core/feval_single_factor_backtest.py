@@ -74,11 +74,12 @@ if __name__ == "__main__":
         backtest_start_date=backtest_start_date,
     )
     
-    
+    file_name = f"{backtest_start_date}_{end_date}_{factor_name}_account_result.pkl"
     result_dir = "/Users/didi/KDCJ/alpha_local/data/account_result"
-    result_file = os.path.join(result_dir, "single_factor_backtest_result.pkl")
+    result_file = os.path.join(result_dir, file_name)
     account_result.to_pickle(result_file)
     print(f"✅单因子策略结果已保存到: {result_file}")
+
     
     # 绩效分析并保存策略报告
     performance_cumnet, result = get_performance_analysis(

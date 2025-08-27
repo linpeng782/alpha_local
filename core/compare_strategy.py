@@ -207,13 +207,87 @@ def compare_two_strategies(
 
     # 绘制对比图表
     if show_plot or save_plot:
-        fig, ax = plt.subplots(1, 1, figsize=(14, 8))
+        # 创建图表，左侧为统一表格，右侧为收益曲线
+        fig = plt.figure(figsize=(26, 12))
 
-        # 创建双y轴
-        ax2 = ax.twinx()
+        # 创建网格布局：1行2列，最大化右侧图表空间
+        gs = fig.add_gridspec(1, 2, 
+                            width_ratios=[0.8, 3.2], 
+                            hspace=0.1, wspace=0.05)
 
-        # 左轴：策略净值曲线
-        line1 = ax.plot(
+        # 左侧：统计表格
+        ax_table = fig.add_subplot(gs[0, 0])
+        ax_table.axis("off")  # 隐藏轴
+
+        # 准备统一表格数据：16行4列
+        table_data = []
+        
+        # 表头
+        table_data.append(["指标", f"{benchmark_name}", f"{strategy_name}", "备注"])
+        
+        # 基本指标
+        table_data.append(["年化收益", f"{benchmark_annual_return:.2%}", f"{strategy_annual_return:.2%}", ""])
+        table_data.append(["年化波动率", f"{benchmark_volatility:.2%}", f"{strategy_volatility:.2%}", ""])
+        table_data.append(["夏普比率", f"{benchmark_sharpe:.3f}", f"{strategy_sharpe:.3f}", ""])
+        
+        # 空行分隔
+        table_data.append(["", "", "", ""])
+        
+        # market_cap策略回撤分析
+        table_data.append([f"{benchmark_name}", "回撤幅度", "起始日期", "结束日期"])
+        for i, dd in enumerate(benchmark_top3_dd[:5], 1):
+            table_data.append([
+                f"第{i}大回撤",
+                f"{dd['drawdown']:.2%}",
+                dd['peak_date'].strftime('%Y-%m-%d'),
+                dd['trough_date'].strftime('%Y-%m-%d')
+            ])
+        
+        # combo策略回撤分析  
+        table_data.append([f"{strategy_name}", "回撤幅度", "起始日期", "结束日期"])
+        for i, dd in enumerate(strategy_top3_dd[:5], 1):
+            table_data.append([
+                f"第{i}大回撤",
+                f"{dd['drawdown']:.2%}",
+                dd['peak_date'].strftime('%Y-%m-%d'),
+                dd['trough_date'].strftime('%Y-%m-%d')
+            ])
+
+        # 创建表格
+        table = ax_table.table(
+            cellText=table_data,
+            cellLoc="center",
+            loc="center",
+            colWidths=[0.3, 0.25, 0.25, 0.2],
+        )
+
+        # 设置表格样式
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1, 1.8)
+
+        # 设置表头样式
+        for i in range(4):
+            table[(0, i)].set_facecolor("#4CAF50")
+            table[(0, i)].set_text_props(weight="bold", color="white")
+        
+        # 设置回撤分析标题样式
+        # market_cap回撤分析标题行（第6行）
+        for i in range(4):
+            table[(5, i)].set_facecolor("blue")
+            table[(5, i)].set_text_props(weight="bold", color="white")
+        
+        # combo回撤分析标题行（第12行）
+        for i in range(4):
+            table[(11, i)].set_facecolor("red")
+            table[(11, i)].set_text_props(weight="bold", color="white")
+
+        # 右侧：收益曲线图
+        ax_chart = fig.add_subplot(gs[0, 1])
+        ax2 = ax_chart.twinx()
+
+        # 绘制曲线
+        line1 = ax_chart.plot(
             cumulative_returns.index,
             cumulative_returns[benchmark_name],
             label=benchmark_name,
@@ -221,7 +295,7 @@ def compare_two_strategies(
             color="blue",
             alpha=0.8,
         )
-        line2 = ax.plot(
+        line2 = ax_chart.plot(
             cumulative_returns.index,
             cumulative_returns[strategy_name],
             label=strategy_name,
@@ -230,7 +304,7 @@ def compare_two_strategies(
             alpha=0.8,
         )
 
-        # 右轴：超额收益曲线
+        # 超额收益曲线
         line3 = ax2.plot(
             cumulative_returns.index,
             cumulative_returns["超额收益"],
@@ -243,34 +317,34 @@ def compare_two_strategies(
         ax2.axhline(y=1, color="gray", linestyle=":", alpha=0.5, linewidth=1)
 
         # 设置标题和标签
-        ax.set_title(
+        ax_chart.set_title(
             f"策略对比分析: {strategy_name} vs {benchmark_name}",
-            fontsize=14,
+            fontsize=16,
             fontweight="bold",
             pad=20,
         )
-        ax.set_xlabel("时间", fontsize=12)
-        ax.set_ylabel("累计净值", fontsize=12, color="black")
-        ax2.set_ylabel("超额收益倍数", fontsize=12, color="green")
+        ax_chart.set_xlabel("时间", fontsize=12)
+        ax_chart.set_ylabel("累计净值", fontsize=12, color="black")
+        ax2.set_ylabel("累计超额收益", fontsize=12, color="green")
 
         # 合并图例
         lines = line1 + line2 + line3
         labels = [l.get_label() for l in lines]
-        ax.legend(lines, labels, loc="upper left", fontsize=11)
+        ax_chart.legend(lines, labels, loc="upper left", fontsize=11)
 
         # 网格和格式
-        ax.grid(True, alpha=0.3)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
-        ax.xaxis.set_major_locator(mdates.YearLocator())
+        ax_chart.grid(True, alpha=0.3)
+        ax_chart.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+        ax_chart.xaxis.set_major_locator(mdates.YearLocator())
 
         # 设置右轴颜色
         ax2.tick_params(axis="y", labelcolor="green")
-
+        
         plt.tight_layout()
 
     if save_plot:
         os.makedirs(output_dir, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         filename = f"strategy_comparison_{timestamp}.png"
         filepath = os.path.join(output_dir, filename)
         plt.savefig(filepath, dpi=300, bbox_inches="tight")
@@ -289,8 +363,19 @@ def main():
 
     # 数据文件路径
     result_dir = "/Users/didi/KDCJ/alpha_local/data/account_result"
-    benchmark_file = os.path.join(result_dir, "single_factor_backtest_result.pkl")
-    strategy_file = os.path.join(result_dir, "small_cap_2_factors_result.pkl")
+    backtest_start_date = "2015-01-01"
+    end_date = "2025-07-01"
+    benchmark_name = "market_cap"
+    strategy_name = "combo"
+
+    benchmark_file = os.path.join(
+        result_dir,
+        f"{backtest_start_date}_{end_date}_{benchmark_name}_account_result.pkl",
+    )
+    strategy_file = os.path.join(
+        result_dir,
+        f"{backtest_start_date}_{end_date}_{strategy_name}_account_result.pkl",
+    )
 
     # 加载数据
     print("加载策略回测结果...")
@@ -302,8 +387,8 @@ def main():
     results, performance_data = compare_two_strategies(
         benchmark_result=benchmark_result,
         strategy_result=strategy_result,
-        benchmark_name="单因子策略(market_cap)",
-        strategy_name="小市值双因子策略",
+        benchmark_name=benchmark_name,
+        strategy_name=strategy_name,
         show_plot=False,
         save_plot=True,
     )

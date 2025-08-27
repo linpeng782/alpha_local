@@ -12,3 +12,4 @@ database/
 *.ipynb_checkpoints/
 .DS_Store
 outputs
+data

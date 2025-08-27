@@ -108,9 +108,10 @@ if __name__ == "__main__":
 
     direction = -1
     neutralize = False
-    
+    factor_name = "combo"
     result_dir = "/Users/didi/KDCJ/alpha_local/data/account_result"
-    result_file = os.path.join(result_dir, "small_cap_2_factors_result.pkl")
+    file_name = f"{backtest_start_date}_{end_date}_{factor_name}_account_result.pkl"
+    result_file = os.path.join(result_dir, file_name)
     account_result.to_pickle(result_file)
     print(f"✅小市值双因子策略结果已保存到: {result_file}")
     
@@ -119,7 +120,7 @@ if __name__ == "__main__":
         direction,
         neutralize,
         benchmark_index=index_item,
-        factor_name="combo",
+        factor_name=factor_name,
         start_date=start_date,
         end_date=end_date,
     )
