@@ -48,37 +48,41 @@ if __name__ == "__main__":
     stock_universe = INDEX_FIX(start_date, end_date, index_item)
 
     # =============================================================================
-    # 双因子策略配置区域 - 方便调整第二个因子
+    # 三因子策略配置区域 - 方便调整因子
     # =============================================================================
 
     # 第一个因子（固定）：小市值筛选
     FIRST_FACTOR = {
-        "name": "market_cap",
-        "neutralize": False,
-        "select_count": 100,  # 选择前100只
-        "direction": -1,
+        'name': 'market_cap',
+        'neutralize': False,
+        'select_count': 200,  # 选择前200只
+        'direction': -1,
     }
 
     SECOND_FACTOR = {
         "name": "dp_ttm",
         "neutralize": True,
-        "select_count": 50,  # 从第一层筛选结果中选择前50只
+        "select_count": 100,  # 从第一层筛选结果中选择前50只
         "direction": 1,
+    }
+    THIRD_FACTOR = {
+        'name': 'high_low_std_504',
+        'neutralize': False,
+        'select_count': 50,   # 从第二层筛选结果中选择前50只
+        'direction': -1,
     }
 
     # 因子配置列表（所有因子都使用direction=1，因为已经调整为值越大越好）
     factor_configs = [
-        (FIRST_FACTOR["name"], FIRST_FACTOR["direction"], FIRST_FACTOR["neutralize"]),
-        (
-            SECOND_FACTOR["name"],
-            SECOND_FACTOR["direction"],
-            SECOND_FACTOR["neutralize"],
-        ),
+        (FIRST_FACTOR['name'], FIRST_FACTOR['direction'], FIRST_FACTOR['neutralize']),
+        (SECOND_FACTOR['name'], SECOND_FACTOR['direction'], SECOND_FACTOR['neutralize']),
+        (THIRD_FACTOR['name'], THIRD_FACTOR['direction'], THIRD_FACTOR['neutralize']),
     ]
 
-    print(f"双因子策略配置:")
+    print(f"三因子策略配置:")
     print(f"  第一层: {FIRST_FACTOR['name']} (选择{FIRST_FACTOR['select_count']}只)")
     print(f"  第二层: {SECOND_FACTOR['name']} (选择{SECOND_FACTOR['select_count']}只)")
+    print(f"  第三层: {THIRD_FACTOR['name']} (选择{THIRD_FACTOR['select_count']}只)")
     print()
 
     # 加载所有因子
@@ -87,37 +91,47 @@ if __name__ == "__main__":
     )
 
     # 获取因子数据
-    first_factor_data = factors_dict[FIRST_FACTOR["name"]]
-    second_factor_data = factors_dict[SECOND_FACTOR["name"]]
+    first_factor_data = factors_dict[FIRST_FACTOR['name']]
+    second_factor_data = factors_dict[SECOND_FACTOR['name']]
+    third_factor_data = factors_dict[THIRD_FACTOR['name']]
 
     # 调试信息：查看每个因子的数据情况
-    print(
-        f"{FIRST_FACTOR['name']}有效数据数量: {first_factor_data.notna().sum(axis=1).iloc[0]}只"
-    )
-    print(
-        f"{SECOND_FACTOR['name']}有效数据数量: {second_factor_data.notna().sum(axis=1).iloc[0]}只"
-    )
+    print(f"{FIRST_FACTOR['name']}有效数据数量: {first_factor_data.notna().sum(axis=1).iloc[0]}只")
+    print(f"{SECOND_FACTOR['name']}有效数据数量: {second_factor_data.notna().sum(axis=1).iloc[0]}只")
+    print(f"{THIRD_FACTOR['name']}有效数据数量: {third_factor_data.notna().sum(axis=1).iloc[0]}只")
 
     # 第一层筛选：按第一个因子筛选（统一使用ascending=False，从大到小）
-    first_mask = (
-        first_factor_data.rank(axis=1, ascending=False) <= FIRST_FACTOR["select_count"]
-    )
-    print(f"第一层筛选后股票数量: {first_mask.sum(axis=1).iloc[0]}只")
+    first_mask = first_factor_data.rank(axis=1, ascending=False) <= FIRST_FACTOR['select_count']
+    print(f"第一层筛选后第一行股票数量: {first_mask.sum(axis=1).iloc[0]}只")
+    print(f"第一层筛选后最后一行股票数量: {first_mask.sum(axis=1).iloc[-1]}只")
+    
+    # 检查两个因子的数据重叠情况
+    overlap_first = (first_factor_data.notna() & second_factor_data.notna()).sum(axis=1)
+    print(f"两个因子数据重叠数量 - 第一行: {overlap_first.iloc[0]}只")
+    print(f"两个因子数据重叠数量 - 最后一行: {overlap_first.iloc[-1]}只")
 
     # 第二层筛选：从第一层结果中按第二个因子筛选（统一使用ascending=False，从大到小）
     second_factor_filtered = second_factor_data.where(first_mask)
-    print(
-        f"第二层筛选前有效数据数量: {second_factor_filtered.notna().sum(axis=1).iloc[0]}只"
-    )
+    print(f"第二层筛选前第一行股票数量: {second_factor_filtered.notna().sum(axis=1).iloc[0]}只")
+    print(f"第二层筛选前最后一行股票数量: {second_factor_filtered.notna().sum(axis=1).iloc[-1]}只")
+    second_mask = second_factor_filtered.rank(axis=1, ascending=False) <= SECOND_FACTOR['select_count']
+    print(f"第二层筛选后第一行股票数量: {second_mask.sum(axis=1).iloc[0]}只")
+    print(f"第二层筛选后最后一行股票数量: {second_mask.sum(axis=1).iloc[-1]}只")
 
-    second_mask = (
-        second_factor_filtered.rank(axis=1, ascending=False)
-        <= SECOND_FACTOR["select_count"]
-    )
-    print(f"第二层筛选后股票数量: {second_mask.sum(axis=1).iloc[0]}只")
+    # 第三层筛选：从前两层筛选结果中按第三个因子筛选（统一使用ascending=False，从大到小）
+    # 需要同时满足前两个因子条件
+    combined_mask = first_mask & second_mask
+    print(f"组合mask后股票数量: {combined_mask.sum(axis=1).iloc[0]}只")
 
-    # 最终筛选结果：同时满足两个因子条件的股票
-    combo_factor = second_factor_filtered.where(second_mask)
+    third_factor_filtered = third_factor_data.where(combined_mask)
+    print(f"第三层筛选前有效数据数量: {third_factor_filtered.notna().sum(axis=1).iloc[0]}只")
+
+    third_mask = third_factor_filtered.rank(axis=1, ascending=False) <= THIRD_FACTOR['select_count']
+    print(f"第三层筛选后股票数量: {third_mask.sum(axis=1).iloc[0]}只")
+    print(f"第三层筛选后最后一行股票数量: {third_mask.sum(axis=1).iloc[-1]}只")
+
+    # 最终筛选结果：同时满足三个因子条件的股票
+    combo_factor = third_factor_filtered.where(third_mask)
 
     # 将非NaN的因子值转换为1，形成等权重买入列表
     buy_list = combo_factor.notna().astype(int)
@@ -148,12 +162,12 @@ if __name__ == "__main__":
 
     direction = -1
     neutralize = False
-    factor_name = "combo_2"
+    factor_name = "combo_3"
     result_dir = "/Users/didi/KDCJ/alpha_local/data/account_result"
     file_name = f"{backtest_start_date}_{end_date}_{factor_name}_account_result.pkl"
     result_file = os.path.join(result_dir, file_name)
     account_result.to_pickle(result_file)
-    print(f"✅小市值双因子策略结果已保存到: {result_file}")
+    print(f"✅小市值三因子策略结果已保存到: {result_file}")
 
     performance_cumnet, result = get_performance_analysis(
         account_result,

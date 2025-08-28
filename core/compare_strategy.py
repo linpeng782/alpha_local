@@ -324,7 +324,7 @@ def compare_two_strategies(
             pad=20,
         )
         ax_chart.set_xlabel("时间", fontsize=12)
-        ax_chart.set_ylabel("累计净值", fontsize=12, color="black")
+        ax_chart.set_ylabel("累计净值", fontsize=12, color="black", labelpad=-5)
         ax2.set_ylabel("累计超额收益", fontsize=12, color="green")
 
         # 合并图例
@@ -366,7 +366,7 @@ def main():
     backtest_start_date = "2015-01-01"
     end_date = "2025-07-01"
     benchmark_name = "market_cap"
-    strategy_name = "combo"
+    strategy_name = "combo_2"
 
     benchmark_file = os.path.join(
         result_dir,

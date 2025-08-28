@@ -52,9 +52,9 @@ if __name__ == "__main__":
 
     stock_universe = INDEX_FIX(start_date, end_date, index_item)
 
-    factor_name = "market_cap"
-    direction = -1
-    neutralize = False
+    factor_name = "roe_ttm"
+    direction = 1
+    neutralize = True   
 
     factor_configs = [(factor_name, direction, neutralize)]
 
@@ -68,6 +68,7 @@ if __name__ == "__main__":
     buy_list = get_buy_list(processed_factor, rank_n=50)
     df_weight = buy_list.div(buy_list.sum(axis=1), axis=0)
     df_weight = df_weight.shift(1).dropna(how="all")
+
     account_result = backtest(
         df_weight,
         rebalance_frequency=rebalance_days,

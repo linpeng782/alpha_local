@@ -15,13 +15,19 @@ OPEN = Factor("open")
 CLOSE = Factor("close")
 VOLUME = Factor("volume")
 TURNOVER = Factor("total_turnover")
+net_profit_parent_company_ttm_0 = Factor("net_profit_parent_company_ttm_0")
+equity_parent_company_ttm_0 = Factor("equity_parent_company_ttm_0")
+equity_parent_company_ttm_1 = Factor("equity_parent_company_ttm_1")
+
 
 # 因子定义字典
 FACTOR_DEFINITIONS = {
     "high_low_std_504": STD(HIGH / LOW, 504),
     "market_cap": Factor("market_cap"),
     "dp_ttm": Factor("dividend_yield_ttm"),
-    "roe_ttm": Factor("roe_ttm"),
+    "roe_ttm": 2
+    * net_profit_parent_company_ttm_0
+    / (equity_parent_company_ttm_0 + equity_parent_company_ttm_1),
 }
 
 # 因子配置信息（支持多种配置）
