@@ -3,8 +3,35 @@ import os
 
 sys.path.insert(0, "/Users/didi/KDCJ")
 from factor_utils import *
+from factor_utils.path_manager import get_data_path
 import pandas as pd
-from factor_config import get_factor_for_test
+from factor_config import get_factor_config
+
+
+def get_stock_universe(start_date, end_date, index_item):
+    """
+    :param start_date: 开始日 -> str
+    :param end_date: 结束日 -> str
+    :param index_item: 指数代码 -> str
+    :return stock_universe: 股票池 -> unstack
+    """
+
+    universe_name = f"{index_item}_{start_date}_{end_date}"
+    try:
+        print(f"✅从因子库加载stock_universe: {universe_name}")
+        stock_universe = pd.read_pickle(
+            get_data_path("stock_universe", filename=universe_name)
+        )
+    except:
+        print(f"✅因子库加载失败,开始计算新的stock_universe: {universe_name}")
+        stock_universe = INDEX_FIX(start_date, end_date, index_item)
+
+        universe_path = get_data_path("stock_universe", filename=universe_name)
+        # 保存stock_universe
+        stock_universe.to_pickle(universe_path)
+        print(f"✅stock_universe已保存到: {universe_path}")
+
+    return stock_universe
 
 
 def get_raw_factor(
@@ -28,11 +55,15 @@ def get_raw_factor(
     universe_start = stock_universe.index[0].strftime("%F")
     universe_end = stock_universe.index[-1].strftime("%F")
     stock_list = stock_universe.columns.tolist()
+
+    # 生成因子文件路径（只需要调用一次）
+    raw_path = get_data_path(
+        "factor_raw",
+        filename=f"{factor_name}_{index_item}_{direction}_{universe_start}_{universe_end}.pkl",
+        index_item=index_item,
+    )
+
     try:
-        raw_path = get_data_path(
-            "factor_raw",
-            filename=f"{factor_name}_{index_item}_{direction}_{universe_start}_{universe_end}.pkl",
-        )
         raw_factor = pd.read_pickle(raw_path)
         print(f"✅从因子库加载原始因子 {raw_path}")
     except:
@@ -46,13 +77,11 @@ def get_raw_factor(
         raw_factor.index.names = ["datetime"]
         raw_factor.columns.names = ["order_book_id"]
 
-        # 保存因子
-        raw_path = get_data_path(
-            "factor_raw",
-            filename=f"{factor_name}_{index_item}_{direction}_{universe_start}_{universe_end}.pkl",
-        )
+        # 保存因子（使用已生成的路径）
         raw_factor.to_pickle(raw_path)
         print(f"✅raw_factor已保存到: {raw_path}")
+
+    print("原始因子 shape:", raw_factor.shape)
 
     return raw_factor
 
@@ -66,7 +95,7 @@ def factor_factory(
     direction,
     neutralize,
     rebalance_days,
-    save_factor=True,
+    layer_test=False,
 ):
     """
     因子工厂函数：从因子定义到完整的因子测试流程
@@ -82,11 +111,11 @@ def factor_factory(
     :param save_factor: 是否保存因子
     :return: 处理后的因子、IC报告、分层回测结果
     """
-    print(f"\n=== 开始因子测试: {factor_name} ===")
+    print(f"\n✅开始因子测试: {factor_name}_{index_item}_{direction}_{neutralize}✅")
 
     # 1. 获取股票池 -> unstack
     print(f"✅获取股票池{index_item}_{start_date}_{end_date}...")
-    stock_universe = INDEX_FIX(start_date, end_date, index_item)
+    stock_universe = get_stock_universe(start_date, end_date, index_item)
     universe_start = stock_universe.index[0].strftime("%F")
     universe_end = stock_universe.index[-1].strftime("%F")
 
@@ -103,18 +132,14 @@ def factor_factory(
     print(
         f"✅因子清洗{factor_name}_{index_item}_{direction}_{neutralize}_{universe_start}_{universe_end}..."
     )
-    processed_factor = preprocess_factor(
-        raw_factor, stock_universe, index_item, neutralize
+    processed_factor = preprocess_raw_factor(
+        factor_name,
+        raw_factor,
+        index_item,
+        direction,
+        neutralize,
+        stock_universe,
     )
-
-    # 4. 保存因子数据
-    if save_factor:
-        processed_path = get_data_path(
-            "factor_processed",
-            filename=f"{factor_name}_{index_item}_{direction}_{neutralize}_{universe_start}_{universe_end}.pkl",
-        )
-        processed_factor.to_pickle(processed_path)
-        print(f"✅processed_factor已保存到: {processed_path}")
 
     # 5. 计算IC
     print(f"✅因子IC分析...")
@@ -127,16 +152,17 @@ def factor_factory(
         factor_name,
     )
 
-    # 6. 分层回测
-    print(f"✅因子分层回测...")
-    return_group_hold, turnover_ratio = factor_layered_backtest(
-        processed_factor,
-        index_item,
-        direction,
-        neutralize,
-        factor_name=factor_name,
-        rebalance_days=rebalance_days,
-    )
+    if layer_test:
+        # 6. 分层回测
+        print(f"✅因子分层回测...")
+        return_group_hold, turnover_ratio = factor_layered_backtest(
+            processed_factor,
+            index_item,
+            direction,
+            neutralize,
+            factor_name=factor_name,
+            rebalance_days=rebalance_days,
+        )
 
 
 if __name__ == "__main__":
@@ -145,18 +171,16 @@ if __name__ == "__main__":
     end_date = "2025-07-01"
     index_item = "000985.XSHG"
     rebalance_days = 20
-    backtest_start_date = start_date
+    layer_test = False
 
     # 当前要测试的因子
-    factor_name = "roe_ttm"
-    direction = 1
-    neutralize = True
+    factor_name = "market_cap_3"
+    neutralize = False
 
-    # 从配置文件获取匹配的因子信息
-    config = get_factor_for_test(
-        factor_name, direction=direction, neutralize=neutralize
-    )
+    # 从配置文件获取因子信息（简化版）
+    config = get_factor_config(factor_name, neutralize=neutralize)
     factor_definition = config["definition"]
+    direction = config["direction"]
 
     # 因子工厂函数
     factor_factory(
@@ -168,4 +192,5 @@ if __name__ == "__main__":
         direction=direction,
         neutralize=neutralize,
         rebalance_days=rebalance_days,
+        layer_test=layer_test,
     )

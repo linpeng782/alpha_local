@@ -8,38 +8,47 @@ import os
 
 sys.path.insert(0, "/Users/didi/KDCJ")
 from factor_utils import *
+from factor_utils.path_manager import get_data_path
+from alpha_local.core.factor_config import get_factor_config
+from alpha_local.core.analyze_single_factor import get_stock_universe
 import pandas as pd
 
 
-def load_processed_factors(factor_configs, index_item, start_date, end_date):
+def load_processed_factor(factor_name, index_item, neutralize, start_date, end_date):
     """
-    从 processed 文件夹加载多个处理后的因子
+    从 processed 文件夹加载单个处理后的因子
 
-    :param factor_configs: 因子配置列表，每个元素为 (factor_name, direction, neutralize)
+    :param factor_name: 因子名称
     :param index_item: 指数代码
+    :param neutralize: 是否中性化
     :param start_date: 开始日期
     :param end_date: 结束日期
-    :return: 因子DataFrame字典
+    :return: 因子DataFrame
     """
-    factors_dict = {}
-    base_path = "/Users/didi/KDCJ/alpha_local/data/factor_lib/processed"
 
-    for factor_name, direction, neutralize in factor_configs:
-        # 构建文件名
-        filename = f"{factor_name}_{index_item}_{direction}_{neutralize}_{start_date}_{end_date}.pkl"
-        file_path = os.path.join(base_path, filename)
+    # 从配置文件获取因子信息并直接加载因子
+    print(f"✅从配置文件获取因子信息...")
+    config = get_factor_config(factor_name, neutralize=neutralize)
+    direction = config["direction"]
 
-        try:
-            # 加载因子数据
-            factor_df = pd.read_pickle(file_path)
-            factors_dict[factor_name] = factor_df
-            print(f"✅加载因子 {filename}")
-        except FileNotFoundError:
-            print(f"❌未找到因子文件: {filename}")
-        except Exception as e:
-            print(f"❌加载因子 {filename} 失败: {e}")
+    # 使用get_data_path构建文件路径
+    factor_file = get_data_path(
+        "factor_processed",
+        filename=f"{factor_name}_{index_item}_{direction}_{neutralize}_{start_date}_{end_date}.pkl",
+        index_item=index_item,
+        neutralize=neutralize,
+    )
 
-    return factors_dict
+    try:
+        factor_df = pd.read_pickle(factor_file)
+        print(f"✅加载因子 {factor_name} 成功")
+        return direction, factor_df
+    except FileNotFoundError:
+        print(f"❌未找到因子文件: {factor_file}")
+        raise
+    except Exception as e:
+        print(f"❌加载因子 {factor_name} 失败: {e}")
+        raise
 
 
 if __name__ == "__main__":
@@ -48,21 +57,26 @@ if __name__ == "__main__":
     end_date = "2025-07-01"
     index_item = "000985.XSHG"
     rebalance_days = 20
-    backtest_start_date = start_date
 
-    stock_universe = INDEX_FIX(start_date, end_date, index_item)
+    stock_universe = get_stock_universe(start_date, end_date, index_item)
+    universe_start = stock_universe.index[0].strftime("%F")
+    universe_end = stock_universe.index[-1].strftime("%F")
 
-    factor_name = "roe_ttm"
-    direction = 1
-    neutralize = True   
-
-    factor_configs = [(factor_name, direction, neutralize)]
-
-    print(f"✅加载因子...")
-    factors_dict = load_processed_factors(
-        factor_configs, index_item, start_date, end_date
+    factor_name = "market_cap_3"
+    neutralize = False
+    backtest_start_date = universe_start
+    print(
+        f"✅加载处理后的因子{factor_name}_{index_item}_{neutralize}_{universe_start}_{universe_end}..."
     )
-    processed_factor = factors_dict[factor_name]
+
+    direction, processed_factor = load_processed_factor(
+        factor_name=factor_name,
+        index_item=index_item,
+        neutralize=neutralize,
+        start_date=universe_start,
+        end_date=universe_end,
+    )
+    print("因子 shape:", processed_factor.shape)
 
     print(f"✅进行策略回测...")
     buy_list = get_buy_list(processed_factor, rank_n=50)
@@ -74,14 +88,17 @@ if __name__ == "__main__":
         rebalance_frequency=rebalance_days,
         backtest_start_date=backtest_start_date,
     )
-    
-    file_name = f"{backtest_start_date}_{end_date}_{factor_name}_account_result.pkl"
-    result_dir = "/Users/didi/KDCJ/alpha_local/data/account_result"
-    result_file = os.path.join(result_dir, file_name)
-    account_result.to_pickle(result_file)
-    print(f"✅单因子策略结果已保存到: {result_file}")
 
-    
+    # 使用get_data_path生成路径
+    account_result_file = get_data_path(
+        "account_result",
+        start_date=backtest_start_date,
+        end_date=end_date,
+        factor_name=factor_name,
+    )
+    account_result.to_pickle(account_result_file)
+    print(f"✅单因子策略结果已保存到: {account_result_file}")
+
     # 绩效分析并保存策略报告
     performance_cumnet, result = get_performance_analysis(
         account_result,
