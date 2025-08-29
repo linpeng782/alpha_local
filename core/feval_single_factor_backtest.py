@@ -10,7 +10,7 @@ sys.path.insert(0, "/Users/didi/KDCJ")
 from factor_utils import *
 from factor_utils.path_manager import get_data_path
 from alpha_local.core.factor_config import get_factor_config
-from alpha_local.core.analyze_single_factor import get_stock_universe
+from alpha_local.core.feval_single_factor_analysis import get_stock_universe
 import pandas as pd
 
 
@@ -53,16 +53,16 @@ def load_processed_factor(factor_name, index_item, neutralize, start_date, end_d
 
 if __name__ == "__main__":
 
-    start_date = "2015-01-01"
+    start_date = "2022-01-01"
     end_date = "2025-07-01"
-    index_item = "000985.XSHG"
+    index_item = "000852.XSHG"
     rebalance_days = 20
 
     stock_universe = get_stock_universe(start_date, end_date, index_item)
     universe_start = stock_universe.index[0].strftime("%F")
     universe_end = stock_universe.index[-1].strftime("%F")
 
-    factor_name = "high_low_std_504"
+    factor_name = "dp_ttm"
     neutralize = True
     backtest_start_date = universe_start
     print(

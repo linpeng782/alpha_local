@@ -164,6 +164,75 @@ def factor_factory(
             rebalance_days=rebalance_days,
         )
 
+    return processed_factor
+
+
+def get_factor_backtest(
+    processed_factor,
+    factor_name,
+    index_item,
+    direction,
+    neutralize,
+    start_date,
+    end_date,
+    rebalance_days,
+    rank_n=50,
+):
+    """
+    因子回测函数：基于处理后的因子进行策略回测和绩效分析
+
+    :param processed_factor: 处理后的因子DataFrame
+    :param factor_name: 因子名称
+    :param index_item: 指数代码
+    :param direction: 因子方向
+    :param neutralize: 是否中性化
+    :param start_date: 开始日期
+    :param end_date: 结束日期
+    :param rebalance_days: 调仓周期
+    :param rank_n: 选股数量
+    :return: account_result, performance_cumnet, result
+    """
+    print(f"✅进行策略回测...")
+
+    # 生成买入列表和权重
+    buy_list = get_buy_list(processed_factor, rank_n=rank_n)
+    df_weight = buy_list.div(buy_list.sum(axis=1), axis=0)
+    df_weight = df_weight.shift(1).dropna(how="all")
+
+    # 确定回测开始日期
+    backtest_start_date = processed_factor.index[0].strftime("%F")
+
+    # 执行回测
+    account_result = backtest(
+        df_weight,
+        rebalance_frequency=rebalance_days,
+        backtest_start_date=backtest_start_date,
+    )
+
+    # 保存回测结果
+    account_result_file = get_data_path(
+        "account_result",
+        start_date=backtest_start_date,
+        end_date=end_date,
+        factor_name=factor_name,
+        index_item=index_item,
+        direction=direction,
+        neutralize=neutralize,
+    )
+    account_result.to_pickle(account_result_file)
+    print(f"✅单因子策略结果已保存到: {account_result_file}")
+
+    # 绩效分析并保存策略报告
+    get_performance_analysis(
+        account_result,
+        direction,
+        neutralize,
+        benchmark_index=index_item,
+        factor_name=factor_name,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
 
 if __name__ == "__main__":
 
@@ -171,10 +240,10 @@ if __name__ == "__main__":
     end_date = "2025-07-01"
     index_item = "000985.XSHG"
     rebalance_days = 20
-    layer_test = True
+    layer_test = False
 
     # 当前要测试的因子
-    factor_name = "high_low_std_504"
+    factor_name = "dp_ttm"
     neutralize = False
 
     # 从配置文件获取因子信息（简化版）
@@ -183,7 +252,7 @@ if __name__ == "__main__":
     direction = config["direction"]
 
     # 因子工厂函数
-    factor_factory(
+    processed_factor = factor_factory(
         start_date=start_date,
         end_date=end_date,
         index_item=index_item,
@@ -193,4 +262,17 @@ if __name__ == "__main__":
         neutralize=neutralize,
         rebalance_days=rebalance_days,
         layer_test=layer_test,
+    )
+
+    # 因子回测
+    get_factor_backtest(
+        processed_factor=processed_factor,
+        factor_name=factor_name,
+        index_item=index_item,
+        direction=direction,
+        neutralize=neutralize,
+        start_date=start_date,
+        end_date=end_date,
+        rebalance_days=rebalance_days,
+        rank_n=50,
     )
