@@ -10,8 +10,15 @@ import matplotlib.dates as mdates
 from matplotlib import rcParams
 import pickle
 import os
+import sys
 import statsmodels.api as sm
 from datetime import datetime
+
+# 添加路径以导入自定义模块
+sys.path.insert(0, "/Users/didi/KDCJ")
+from factor_utils.path_manager import get_data_path
+from alpha_local.core.factor_config import get_factor_config
+from alpha_local.core.analyze_single_factor import get_stock_universe
 
 # 设置中文字体
 rcParams["font.sans-serif"] = ["SimHei", "Arial Unicode MS", "DejaVu Sans"]
@@ -28,10 +35,14 @@ def compare_two_strategies(
     strategy_result,
     benchmark_name="基准策略",
     strategy_name="测试策略",
+    benchmark_neutralize=False,
+    strategy_neutralize=True,
+    index_item="000985.XSHG",
+    start_date=None,
+    end_date=None,
     rf=0.03,
     show_plot=True,
     save_plot=True,
-    output_dir="/Users/didi/KDCJ/alpha_local/outputs/images",
 ):
     """
     对比两个策略的表现
@@ -47,11 +58,14 @@ def compare_two_strategies(
     output_dir: 图表保存目录
     """
 
-    # 构建对比数据
+    # 构建对比数据，使用更具描述性的列名
+    benchmark_label = f"{benchmark_name}_{'neutral' if benchmark_neutralize else 'raw'}"
+    strategy_label = f"{strategy_name}_{'neutral' if strategy_neutralize else 'raw'}"
+
     performance = pd.concat(
         [
-            benchmark_result["total_account_asset"].to_frame(benchmark_name),
-            strategy_result["total_account_asset"].to_frame(strategy_name),
+            benchmark_result["total_account_asset"].to_frame(benchmark_label),
+            strategy_result["total_account_asset"].to_frame(strategy_label),
         ],
         axis=1,
     )
@@ -64,15 +78,15 @@ def compare_two_strategies(
 
     # 计算超额收益（策略相对基准）
     cumulative_returns["超额收益"] = (
-        cumulative_returns[strategy_name] / cumulative_returns[benchmark_name]
+        cumulative_returns[strategy_label] / cumulative_returns[benchmark_label]
     )
 
     # 计算各项指标
     daily_pct_change = cumulative_returns.pct_change().dropna()
 
     # 策略表现指标
-    strategy_final_return = cumulative_returns[strategy_name].iloc[-1] - 1
-    benchmark_final_return = cumulative_returns[benchmark_name].iloc[-1] - 1
+    strategy_final_return = cumulative_returns[strategy_label].iloc[-1] - 1
+    benchmark_final_return = cumulative_returns[benchmark_label].iloc[-1] - 1
     excess_final_return = cumulative_returns["超额收益"].iloc[-1] - 1
 
     # 年化收益率
@@ -82,8 +96,8 @@ def compare_two_strategies(
     excess_annual_return = (1 + excess_final_return) ** (252 / trading_days) - 1
 
     # 波动率
-    strategy_volatility = daily_pct_change[strategy_name].std() * np.sqrt(252)
-    benchmark_volatility = daily_pct_change[benchmark_name].std() * np.sqrt(252)
+    strategy_volatility = daily_pct_change[strategy_label].std() * np.sqrt(252)
+    benchmark_volatility = daily_pct_change[benchmark_label].std() * np.sqrt(252)
 
     # 夏普比率
     strategy_sharpe = (strategy_annual_return - rf) / strategy_volatility
@@ -158,8 +172,8 @@ def compare_two_strategies(
         return drawdown_periods[:5]
 
     # 计算前三大回撤
-    strategy_top3_dd = calculate_top3_drawdowns(cumulative_returns[strategy_name])
-    benchmark_top3_dd = calculate_top3_drawdowns(cumulative_returns[benchmark_name])
+    strategy_top3_dd = calculate_top3_drawdowns(cumulative_returns[strategy_label])
+    benchmark_top3_dd = calculate_top3_drawdowns(cumulative_returns[benchmark_label])
 
     # 构建结果字典
     results = {
@@ -211,9 +225,7 @@ def compare_two_strategies(
         fig = plt.figure(figsize=(26, 12))
 
         # 创建网格布局：1行2列，最大化右侧图表空间
-        gs = fig.add_gridspec(1, 2, 
-                            width_ratios=[0.8, 3.2], 
-                            hspace=0.1, wspace=0.05)
+        gs = fig.add_gridspec(1, 2, width_ratios=[0.8, 3.2], hspace=0.1, wspace=0.05)
 
         # 左侧：统计表格
         ax_table = fig.add_subplot(gs[0, 0])
@@ -221,37 +233,57 @@ def compare_two_strategies(
 
         # 准备统一表格数据：16行4列
         table_data = []
-        
+
         # 表头
         table_data.append(["指标", f"{benchmark_name}", f"{strategy_name}", "备注"])
-        
+
         # 基本指标
-        table_data.append(["年化收益", f"{benchmark_annual_return:.2%}", f"{strategy_annual_return:.2%}", ""])
-        table_data.append(["年化波动率", f"{benchmark_volatility:.2%}", f"{strategy_volatility:.2%}", ""])
-        table_data.append(["夏普比率", f"{benchmark_sharpe:.3f}", f"{strategy_sharpe:.3f}", ""])
-        
+        table_data.append(
+            [
+                "年化收益",
+                f"{benchmark_annual_return:.2%}",
+                f"{strategy_annual_return:.2%}",
+                "",
+            ]
+        )
+        table_data.append(
+            [
+                "年化波动率",
+                f"{benchmark_volatility:.2%}",
+                f"{strategy_volatility:.2%}",
+                "",
+            ]
+        )
+        table_data.append(
+            ["夏普比率", f"{benchmark_sharpe:.3f}", f"{strategy_sharpe:.3f}", ""]
+        )
+
         # 空行分隔
         table_data.append(["", "", "", ""])
-        
+
         # market_cap策略回撤分析
         table_data.append([f"{benchmark_name}", "回撤幅度", "起始日期", "结束日期"])
         for i, dd in enumerate(benchmark_top3_dd[:5], 1):
-            table_data.append([
-                f"第{i}大回撤",
-                f"{dd['drawdown']:.2%}",
-                dd['peak_date'].strftime('%Y-%m-%d'),
-                dd['trough_date'].strftime('%Y-%m-%d')
-            ])
-        
-        # combo策略回撤分析  
+            table_data.append(
+                [
+                    f"第{i}大回撤",
+                    f"{dd['drawdown']:.2%}",
+                    dd["peak_date"].strftime("%Y-%m-%d"),
+                    dd["trough_date"].strftime("%Y-%m-%d"),
+                ]
+            )
+
+        # combo策略回撤分析
         table_data.append([f"{strategy_name}", "回撤幅度", "起始日期", "结束日期"])
         for i, dd in enumerate(strategy_top3_dd[:5], 1):
-            table_data.append([
-                f"第{i}大回撤",
-                f"{dd['drawdown']:.2%}",
-                dd['peak_date'].strftime('%Y-%m-%d'),
-                dd['trough_date'].strftime('%Y-%m-%d')
-            ])
+            table_data.append(
+                [
+                    f"第{i}大回撤",
+                    f"{dd['drawdown']:.2%}",
+                    dd["peak_date"].strftime("%Y-%m-%d"),
+                    dd["trough_date"].strftime("%Y-%m-%d"),
+                ]
+            )
 
         # 创建表格
         table = ax_table.table(
@@ -270,13 +302,13 @@ def compare_two_strategies(
         for i in range(4):
             table[(0, i)].set_facecolor("#4CAF50")
             table[(0, i)].set_text_props(weight="bold", color="white")
-        
+
         # 设置回撤分析标题样式
         # market_cap回撤分析标题行（第6行）
         for i in range(4):
             table[(5, i)].set_facecolor("blue")
             table[(5, i)].set_text_props(weight="bold", color="white")
-        
+
         # combo回撤分析标题行（第12行）
         for i in range(4):
             table[(11, i)].set_facecolor("red")
@@ -289,7 +321,7 @@ def compare_two_strategies(
         # 绘制曲线
         line1 = ax_chart.plot(
             cumulative_returns.index,
-            cumulative_returns[benchmark_name],
+            cumulative_returns[benchmark_label],
             label=benchmark_name,
             linewidth=2.5,
             color="blue",
@@ -297,7 +329,7 @@ def compare_two_strategies(
         )
         line2 = ax_chart.plot(
             cumulative_returns.index,
-            cumulative_returns[strategy_name],
+            cumulative_returns[strategy_label],
             label=strategy_name,
             linewidth=2.5,
             color="red",
@@ -339,14 +371,32 @@ def compare_two_strategies(
 
         # 设置右轴颜色
         ax2.tick_params(axis="y", labelcolor="green")
-        
+
         plt.tight_layout()
 
     if save_plot:
-        os.makedirs(output_dir, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-        filename = f"strategy_comparison_{timestamp}.png"
-        filepath = os.path.join(output_dir, filename)
+        # 使用get_data_path生成保存路径
+        if start_date and end_date:
+            filepath = get_data_path(
+                "strategy_comparison",
+                benchmark_name=benchmark_name,
+                benchmark_neutralize=benchmark_neutralize,
+                strategy_name=strategy_name,
+                strategy_neutralize=strategy_neutralize,
+                index_item=index_item,
+                start_date=start_date,
+                end_date=end_date,
+            )
+        else:
+            # 如果没有提供日期，使用时间戳
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+            filename = f"strategy_comparison_{timestamp}.png"
+            filepath = get_data_path(
+                "strategy_comparison",
+                filename=filename,
+                index_item=index_item,
+            )
+        
         plt.savefig(filepath, dpi=300, bbox_inches="tight")
         print(f"\n✅对比图表已保存到: {filepath}")
 
@@ -358,24 +408,126 @@ def compare_two_strategies(
     return results, cumulative_returns
 
 
+def get_comparison_config(scenario="scenario1"):
+    """
+    获取策略对比配置
+    
+    参数:
+        scenario: 对比场景
+            - "scenario1": 同一因子的中性化 vs 非中性化
+            - "scenario2": 不同因子的对比
+            - "scenario3": 多因子策略 vs 单因子策略
+            - "custom": 自定义配置
+    
+    返回:
+        (benchmark_name, benchmark_neutralize, strategy_name, strategy_neutralize)
+    """
+    
+    configs = {
+        "scenario1": (
+            "high_low_std_504", False,  # 基准: 非中性化版本
+            "high_low_std_504", True    # 策略: 中性化版本
+        ),
+        "scenario2": (
+            "market_cap", False,        # 基准: 市值因子
+            "high_low_std_504", True    # 策略: 波动率因子
+        ),
+        "scenario3": (
+            "combo_2", True,            # 基准: 多因子策略
+            "market_cap", False         # 策略: 单因子策略
+        )
+    }
+    
+    if scenario in configs:
+        return configs[scenario]
+    else:
+        # 自定义配置，返回默认值
+        return "high_low_std_504", False, "high_low_std_504", True
+
+
 def main():
     """主函数：执行策略对比分析"""
 
-    # 数据文件路径
-    result_dir = "/Users/didi/KDCJ/alpha_local/data/account_result"
-    backtest_start_date = "2015-01-01"
+    # 基本参数设置
+    index_item = "000985.XSHG"
+    start_date = "2015-01-01"
     end_date = "2025-07-01"
-    benchmark_name = "market_cap"
-    strategy_name = "combo_2"
 
-    benchmark_file = os.path.join(
-        result_dir,
-        f"{backtest_start_date}_{end_date}_{benchmark_name}_account_result.pkl",
+    # 获取股票池和实际回测日期
+    stock_universe = get_stock_universe(start_date, end_date, index_item)
+    universe_start = stock_universe.index[0].strftime("%F")
+    universe_end = stock_universe.index[-1].strftime("%F")
+    backtest_start_date = universe_start
+
+    # =================================================================
+    # 策略对比配置区域
+    # =================================================================
+    
+    # 选择对比场景：
+    # "scenario1": 同一因子的中性化 vs 非中性化
+    # "scenario2": 不同因子的对比 (market_cap vs high_low_std_504)
+    # "scenario3": 多因子策略 vs 单因子策略 (combo_2 vs market_cap)
+    
+    current_scenario = "scenario1"  # 修改这里来切换不同的对比场景
+    
+    # 获取配置
+    benchmark_name, benchmark_neutralize, strategy_name, strategy_neutralize = get_comparison_config(current_scenario)
+    
+    # 也可以手动覆盖配置（取消注释即可）：
+    # benchmark_name, benchmark_neutralize = "high_low_std_504", False
+    # strategy_name, strategy_neutralize = "high_low_std_504", True
+    
+    # =================================================================
+    
+    # 从配置文件获取因子信息
+    benchmark_config = get_factor_config(
+        benchmark_name, neutralize=benchmark_neutralize
     )
-    strategy_file = os.path.join(
-        result_dir,
-        f"{backtest_start_date}_{end_date}_{strategy_name}_account_result.pkl",
+    strategy_config = get_factor_config(strategy_name, neutralize=strategy_neutralize)
+    benchmark_direction = benchmark_config["direction"]
+    strategy_direction = strategy_config["direction"]
+    
+    # 显示对比配置
+    print(f"\n=== 策略对比配置 ===")
+    print(f"基准策略: {benchmark_name} (中性化: {benchmark_neutralize}, 方向: {benchmark_direction})")
+    print(f"对比策略: {strategy_name} (中性化: {strategy_neutralize}, 方向: {strategy_direction})")
+    print(f"==================\n")
+
+    # 使用get_data_path生成文件路径
+    benchmark_file = get_data_path(
+        "account_result",
+        start_date=backtest_start_date,
+        end_date=end_date,
+        factor_name=benchmark_name,
+        index_item=index_item,
+        direction=benchmark_direction,
+        neutralize=benchmark_neutralize,
     )
+
+    strategy_file = get_data_path(
+        "account_result",
+        start_date=backtest_start_date,
+        end_date=end_date,
+        factor_name=strategy_name,
+        index_item=index_item,
+        direction=strategy_direction,
+        neutralize=strategy_neutralize,
+    )
+
+    # 显示生成的文件路径
+    print(f"基准策略文件路径: {benchmark_file}")
+    print(f"对比策略文件路径: {strategy_file}")
+
+    # 检查文件是否存在
+    if not os.path.exists(benchmark_file):
+        print(f"⚠️  警告：基准策略文件不存在: {benchmark_file}")
+        print(f"    请先运行 {benchmark_name} 因子的回测")
+        return
+
+    if not os.path.exists(strategy_file):
+        print(f"⚠️  警告：对比策略文件不存在: {strategy_file}")
+        print(f"    请先运行 {strategy_name} 因子的回测")
+        return
 
     # 加载数据
     print("加载策略回测结果...")
@@ -389,6 +541,11 @@ def main():
         strategy_result=strategy_result,
         benchmark_name=benchmark_name,
         strategy_name=strategy_name,
+        benchmark_neutralize=benchmark_neutralize,
+        strategy_neutralize=strategy_neutralize,
+        index_item=index_item,
+        start_date=backtest_start_date,
+        end_date=end_date,
         show_plot=False,
         save_plot=True,
     )

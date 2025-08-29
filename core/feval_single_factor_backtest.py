@@ -62,8 +62,8 @@ if __name__ == "__main__":
     universe_start = stock_universe.index[0].strftime("%F")
     universe_end = stock_universe.index[-1].strftime("%F")
 
-    factor_name = "market_cap_3"
-    neutralize = False
+    factor_name = "high_low_std_504"
+    neutralize = True
     backtest_start_date = universe_start
     print(
         f"✅加载处理后的因子{factor_name}_{index_item}_{neutralize}_{universe_start}_{universe_end}..."
@@ -89,12 +89,15 @@ if __name__ == "__main__":
         backtest_start_date=backtest_start_date,
     )
 
-    # 使用get_data_path生成路径
+    # 使用get_data_path生成路径，按指数、日期和中性化状态分类
     account_result_file = get_data_path(
         "account_result",
         start_date=backtest_start_date,
         end_date=end_date,
         factor_name=factor_name,
+        index_item=index_item,
+        direction=direction,
+        neutralize=neutralize,
     )
     account_result.to_pickle(account_result_file)
     print(f"✅单因子策略结果已保存到: {account_result_file}")
