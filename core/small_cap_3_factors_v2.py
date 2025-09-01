@@ -4,7 +4,7 @@ import pickle
 
 sys.path.insert(0, "/Users/didi/KDCJ")
 from factor_utils import *
-from factor_utils.path_manager import get_data_path
+from factor_utils.path_manager import get_data_path, load_processed_factors
 from alpha_local.core.factor_config import get_factor_config
 import pandas as pd
 from alpha_local.core.feval_single_factor_analysis import (
@@ -13,8 +13,50 @@ from alpha_local.core.feval_single_factor_analysis import (
 )
 
 
-def format_market_cap_stats(stats_series):
-    """将市值统计数据从科学计数法转换为易读格式"""
+# 分域研究：提取roe_yoy的特定分组
+def extract_factor_groups(factor_data, group_numbers, total_groups=10):
+    """
+    从因子中提取特定分组的股票
+
+    :param factor_data: 因子数据DataFrame
+    :param group_numbers: 要提取的分组编号列表，如[7,8,9]
+    :param total_groups: 总分组数，默认10
+    :return: 提取的股票mask
+    """
+    # 计算因子排名（升序，NaN值排在最后）
+    factor_rank = factor_data.rank(axis=1, method="first", na_option="bottom")
+
+    # 计算每日有效股票数量
+    valid_count = factor_data.notna().sum(axis=1)
+
+    # 为每个日期创建分组mask
+    group_mask = pd.DataFrame(
+        False, index=factor_data.index, columns=factor_data.columns
+    )
+
+    for date in factor_data.index:
+        daily_valid_count = valid_count[date]
+        if daily_valid_count == 0:
+            continue
+
+        # 计算分组边界
+        group_size = daily_valid_count / total_groups
+
+        for group_num in group_numbers:
+            # 计算该组的排名范围
+            start_rank = (group_num - 1) * group_size + 1
+            end_rank = group_num * group_size
+
+            # 找到该组的股票
+            daily_rank = factor_rank.loc[date]
+            group_stocks = (daily_rank >= start_rank) & (daily_rank <= end_rank)
+            group_mask.loc[date] = group_mask.loc[date] | group_stocks
+
+    return group_mask
+
+
+def print_cap_stats(market_cap_data, title="市值统计"):
+    """打印市值统计信息（易读格式）"""
 
     def format_value(value):
         if pd.isna(value):
@@ -32,76 +74,21 @@ def format_market_cap_stats(stats_series):
         else:
             return f"{abs_value:.0f}"
 
-    formatted_stats = {}
-    for key, value in stats_series.items():
+    # 打印股票数量统计
+    stock_counts = market_cap_data.notna().sum(axis=1)
+    print(f"截面非空股票数量: {stock_counts.describe()}")
+
+    # 计算市值统计信息
+    stats = market_cap_data.stack().describe()
+
+    print(f"{title}:")
+    for key, value in stats.items():
         if key == "count":
-            formatted_stats[key] = f"{value:.0f}"
+            formatted_value = f"{value:.0f}"
         else:
-            formatted_stats[key] = format_value(value)
-
-    return formatted_stats
-
-
-def load_processed_factors(factor_names, neutralize, index_item, start_date, end_date):
-    """
-    从 processed 文件夹加载处理后的因子，支持单个或多个因子
-
-    :param factor_names: 因子名称或因子名称列表
-    :param neutralize: 是否中性化
-    :param index_item: 指数代码
-    :param start_date: 开始日期
-    :param end_date: 结束日期
-    :return: 单个因子返回DataFrame，多个因子返回字典
-    """
-    # 统一处理为列表格式
-    if isinstance(factor_names, str):
-        factor_names = [factor_names]
-        return_single = True
-    else:
-        return_single = False
-
-    factors_dict = {}
-
-    for factor_name in factor_names:
-        try:
-            # 获取因子配置信息
-            factor_info = get_factor_config(factor_name, neutralize=neutralize)
-            direction = factor_info["direction"]
-
-            # 构建文件名
-            filename = f"{factor_name}_{index_item}_{direction}_{neutralize}_{start_date}_{end_date}.pkl"
-
-            # 使用统一路径管理生成文件路径
-            file_path = get_data_path(
-                "factor_processed",
-                factor_name=factor_name,
-                index_item=index_item,
-                direction=direction,
-                neutralize=neutralize,
-                start_date=start_date,
-                end_date=end_date,
-                filename=filename,
-            )
-
-            # 加载因子数据
-            factor_df = pd.read_pickle(file_path)
-            factors_dict[factor_name] = factor_df
-            print(f"✅加载因子: {factor_name} (中性化: {neutralize})")
-
-        except FileNotFoundError:
-            print(f"❌未找到因子文件: {factor_name}")
-        except Exception as e:
-            print(f"❌加载因子 {factor_name} 失败: {e}")
-
-    # 根据输入类型返回结果
-    if return_single:
-        if len(factors_dict) == 1:
-            return list(factors_dict.values())[0]
-        else:
-            return None
-    else:
-        print(f"\n📊成功加载 {len(factors_dict)} 个因子")
-        return factors_dict
+            formatted_value = format_value(value)
+        print(f"  {key}: {formatted_value}")
+    print()
 
 
 if __name__ == "__main__":
@@ -122,6 +109,7 @@ if __name__ == "__main__":
         "bp_lyr",
         "eps",
         "roe_yoy",
+        "high_low_std_504",
         "turnover_std_20",
         "market_cap_3",
     ]
@@ -134,84 +122,34 @@ if __name__ == "__main__":
     )
 
     bp_lyr = factors_dict["bp_lyr"]
-    eps = factors_dict["eps"]
     roe_yoy = factors_dict["roe_yoy"]
+    high_low_std_504 = factors_dict["high_low_std_504"]
+    turnover_std_20 = factors_dict["turnover_std_20"]
+    market_cap_3 = factors_dict["market_cap_3"]
 
-    positive_bp_mask = bp_lyr > 0
-    positvie_eps_mask = eps > 0
-    positive_roe_mask = roe_yoy > 0
-    positive_bp_eps = positive_bp_mask & positvie_eps_mask
+    bp_groups = extract_factor_groups(bp_lyr, [7, 8, 9, 10])
+    roe_groups = extract_factor_groups(roe_yoy, [6, 7, 8, 9])
+    bp_roe_groups = bp_groups & roe_groups
+    market_cap_filtered = market_cap_3.where(bp_roe_groups)
+    print_cap_stats(market_cap_filtered, "筛选后股票市值分布")
 
-    # print(f"bp_lyr正因子数量: {positive_bp_mask.sum(axis=1)}")
-    # print(f"eps正因子数量: {positvie_eps_mask.sum(axis=1)}")
-    # print(f"bp_lyr和eps正因子数量: {positive_bp_eps.sum(axis=1)}")
-    # print(f"roe_yoy正因子数量: {positive_roe_mask.sum(axis=1)}")
+    market_cap_mask = market_cap_3.rank(axis=1, ascending=False) <= 1000
+    market_cap_filtered = market_cap_filtered.where(market_cap_mask)
+    print_cap_stats(market_cap_filtered, "市值最小的前1000只股票市值分布")
 
-    positive_bp_eps_roe = positive_bp_eps & positive_roe_mask
-    # print(f"bp_lyr和eps和roe_yoy正因子数量: {positive_bp_eps_roe.sum(axis=1)}")
+    turnover_filtered = turnover_std_20.where(market_cap_filtered.notna())
+    turnover_mask = turnover_std_20.rank(axis=1, ascending=False) <= 1000
+    turnover_filtered = turnover_filtered.where(turnover_mask)
+    print_cap_stats(turnover_filtered, "最终选股市值分布")
 
-    # 使用where保留三个因子都为正的股票的market_cap_3值
-    market_cap_positive_filtered = factors_dict["market_cap_3"].where(
-        positive_bp_eps_roe
-    )
-
-    # 计算过滤后每个截面的平均市值（三因子都为正的股票）
-    avg_market_cap_positive = market_cap_positive_filtered.mean(axis=1, skipna=True)
-    formatted_stats_positive = format_market_cap_stats(
-        avg_market_cap_positive.describe()
-    )
-    print("三因子都为正股票的平均市值:")
-    for key, value in formatted_stats_positive.items():
-        print(f"  {key}: {value}")
-
-    # 在三因子都为正的股票中，选择市值最小的前cap_rank只股票
-    cap_rank = 1000
-    market_cap_mask = (
-        market_cap_positive_filtered.rank(axis=1, ascending=False) <= cap_rank
-    )
-    market_cap_filtered = market_cap_positive_filtered.where(market_cap_mask)
-
-    # 计算前cap_rank只小市值股票的平均市值
-    avg_market_cap_rank = market_cap_filtered.mean(axis=1, skipna=True)
-    formatted_stats_rank = format_market_cap_stats(avg_market_cap_rank.describe())
-    print(f"前{cap_rank}只市值股票的平均市值:")
-    for key, value in formatted_stats_rank.items():
-        print(f"  {key}: {value}")
-
-    # 在前cap_rank只小市值股票中，选择换手率最小的前turnover_rank只股票
-    turnover_rank = 1000
-    turnover_mask = (
-        factors_dict["turnover_std_20"].rank(axis=1, ascending=False) <= turnover_rank
-    )
-    market_cap_turnover_filtered = market_cap_filtered.where(turnover_mask)
-    print(
-        "经过turnover过滤后的股票数量: ",
-        market_cap_turnover_filtered.notna().sum(axis=1).describe(),
-    )
-
-    # 计算经过turnover过滤后股票的平均市值
-    avg_market_cap_turnover = market_cap_turnover_filtered.mean(axis=1, skipna=True)
-    formatted_stats_turnover = format_market_cap_stats(
-        avg_market_cap_turnover.describe()
-    )
-    print(f"经过turnover过滤后的股票的平均市值:")
-    for key, value in formatted_stats_turnover.items():
-        print(f"  {key}: {value}")
-
-    # 1月份空仓
-    # january_mask = market_cap_turnover_filtered.index.month == 1
-    # january_data = market_cap_turnover_filtered.loc[january_mask]
-    # market_cap_turnover_filtered.loc[january_mask] = january_data.where(
-    #     january_data.isna(), 0
-    # )
-
-    factor_name = "combo3_turnover_rebalance_5_january_out"
+    factor_name = "combo3_group_division"
     direction = "long"
     neutralize = False
     rebalance_days = 5
+    buy_rank = 50
     # 因子回测
     get_factor_backtest(
-        processed_factor=market_cap_turnover_filtered,
+        processed_factor=market_cap_filtered,
         factor_name=factor_name,
         index_item=index_item,
         direction=direction,
@@ -219,5 +157,5 @@ if __name__ == "__main__":
         start_date=start_date,
         end_date=end_date,
         rebalance_days=rebalance_days,
-        rank_n=50,
+        rank_n=buy_rank,
     )

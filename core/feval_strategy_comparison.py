@@ -464,7 +464,7 @@ def main():
     benchmark_neutralize = False
     benchmark_direction = "-1"
     
-    strategy_name = "combo3_turnover_rebalance_5_january_out"
+    strategy_name = "combo3_group_division"
     strategy_neutralize = False
     strategy_direction = "long"
 

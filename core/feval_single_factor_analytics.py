@@ -200,9 +200,9 @@ def get_factor_backtest(
     df_weight = df_weight.shift(1).dropna(how="all")
 
     # 1月份空仓
-    # january_mask = df_weight.index.month == 1
-    # january_data = df_weight.loc[january_mask]
-    # df_weight.loc[january_mask] = january_data.where(january_data.isna(), 0)
+    january_mask = df_weight.index.month == 1
+    january_data = df_weight.loc[january_mask]
+    df_weight.loc[january_mask] = january_data.where(january_data.isna(), 0)
 
     # 确定回测开始日期
     backtest_start_date = processed_factor.index[0].strftime("%F")

@@ -4,7 +4,7 @@ import pickle
 
 sys.path.insert(0, "/Users/didi/KDCJ")
 from factor_utils import *
-from factor_utils.path_manager import get_data_path
+from factor_utils.path_manager import get_data_path, load_processed_factors
 from alpha_local.core.factor_config import get_factor_config
 import pandas as pd
 from alpha_local.core.feval_single_factor_analysis import (
@@ -13,8 +13,8 @@ from alpha_local.core.feval_single_factor_analysis import (
 )
 
 
-def format_market_cap_stats(stats_series):
-    """将市值统计数据从科学计数法转换为易读格式"""
+def print_cap_stats(market_cap_data, title="市值统计"):
+    """打印市值统计信息（易读格式）"""
 
     def format_value(value):
         if pd.isna(value):
@@ -32,76 +32,21 @@ def format_market_cap_stats(stats_series):
         else:
             return f"{abs_value:.0f}"
 
-    formatted_stats = {}
-    for key, value in stats_series.items():
+    # 打印股票数量统计
+    stock_counts = market_cap_data.notna().sum(axis=1)
+    print(f"截面非空股票数量: {stock_counts.describe()}")
+
+    # 计算市值统计信息
+    stats = market_cap_data.stack().describe()
+
+    print(f"{title}:")
+    for key, value in stats.items():
         if key == "count":
-            formatted_stats[key] = f"{value:.0f}"
+            formatted_value = f"{value:.0f}"
         else:
-            formatted_stats[key] = format_value(value)
-
-    return formatted_stats
-
-
-def load_processed_factors(factor_names, neutralize, index_item, start_date, end_date):
-    """
-    从 processed 文件夹加载处理后的因子，支持单个或多个因子
-
-    :param factor_names: 因子名称或因子名称列表
-    :param neutralize: 是否中性化
-    :param index_item: 指数代码
-    :param start_date: 开始日期
-    :param end_date: 结束日期
-    :return: 单个因子返回DataFrame，多个因子返回字典
-    """
-    # 统一处理为列表格式
-    if isinstance(factor_names, str):
-        factor_names = [factor_names]
-        return_single = True
-    else:
-        return_single = False
-
-    factors_dict = {}
-
-    for factor_name in factor_names:
-        try:
-            # 获取因子配置信息
-            factor_info = get_factor_config(factor_name, neutralize=neutralize)
-            direction = factor_info["direction"]
-
-            # 构建文件名
-            filename = f"{factor_name}_{index_item}_{direction}_{neutralize}_{start_date}_{end_date}.pkl"
-
-            # 使用统一路径管理生成文件路径
-            file_path = get_data_path(
-                "factor_processed",
-                factor_name=factor_name,
-                index_item=index_item,
-                direction=direction,
-                neutralize=neutralize,
-                start_date=start_date,
-                end_date=end_date,
-                filename=filename,
-            )
-
-            # 加载因子数据
-            factor_df = pd.read_pickle(file_path)
-            factors_dict[factor_name] = factor_df
-            print(f"✅加载因子: {factor_name} (中性化: {neutralize})")
-
-        except FileNotFoundError:
-            print(f"❌未找到因子文件: {factor_name}")
-        except Exception as e:
-            print(f"❌加载因子 {factor_name} 失败: {e}")
-
-    # 根据输入类型返回结果
-    if return_single:
-        if len(factors_dict) == 1:
-            return list(factors_dict.values())[0]
-        else:
-            return None
-    else:
-        print(f"\n📊成功加载 {len(factors_dict)} 个因子")
-        return factors_dict
+            formatted_value = format_value(value)
+        print(f"  {key}: {formatted_value}")
+    print()
 
 
 if __name__ == "__main__":
@@ -141,28 +86,13 @@ if __name__ == "__main__":
     positvie_eps_mask = eps > 0
     positive_roe_mask = roe_yoy > 0
     positive_bp_eps = positive_bp_mask & positvie_eps_mask
-
-    # print(f"bp_lyr正因子数量: {positive_bp_mask.sum(axis=1)}")
-    # print(f"eps正因子数量: {positvie_eps_mask.sum(axis=1)}")
-    # print(f"bp_lyr和eps正因子数量: {positive_bp_eps.sum(axis=1)}")
-    # print(f"roe_yoy正因子数量: {positive_roe_mask.sum(axis=1)}")
-
     positive_bp_eps_roe = positive_bp_eps & positive_roe_mask
-    # print(f"bp_lyr和eps和roe_yoy正因子数量: {positive_bp_eps_roe.sum(axis=1)}")
 
     # 使用where保留三个因子都为正的股票的market_cap_3值
     market_cap_positive_filtered = factors_dict["market_cap_3"].where(
         positive_bp_eps_roe
     )
-
-    # 计算过滤后每个截面的平均市值（三因子都为正的股票）
-    avg_market_cap_positive = market_cap_positive_filtered.mean(axis=1, skipna=True)
-    formatted_stats_positive = format_market_cap_stats(
-        avg_market_cap_positive.describe()
-    )
-    print("三因子都为正股票的平均市值:")
-    for key, value in formatted_stats_positive.items():
-        print(f"  {key}: {value}")
+    print_cap_stats(market_cap_positive_filtered, "三因子都为正股票的平均市值")
 
     # 在三因子都为正的股票中，选择市值最小的前cap_rank只股票
     cap_rank = 1000
