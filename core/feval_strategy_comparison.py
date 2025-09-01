@@ -18,7 +18,7 @@ from datetime import datetime
 sys.path.insert(0, "/Users/didi/KDCJ")
 from factor_utils.path_manager import get_data_path
 from alpha_local.core.factor_config import get_factor_config
-from alpha_local.core.analyze_single_factor import get_stock_universe
+from alpha_local.core.feval_single_factor_analysis import get_stock_universe
 
 # 设置中文字体
 rcParams["font.sans-serif"] = ["SimHei", "Arial Unicode MS", "DejaVu Sans"]
@@ -459,39 +459,15 @@ def main():
     universe_end = stock_universe.index[-1].strftime("%F")
     backtest_start_date = universe_start
 
-    # =================================================================
-    # 策略对比配置区域
-    # =================================================================
+
+    benchmark_name = "market_cap_3"
+    benchmark_neutralize = False
+    benchmark_direction = "-1"
     
-    # 选择对比场景：
-    # "scenario1": 同一因子的中性化 vs 非中性化
-    # "scenario2": 不同因子的对比 (market_cap vs high_low_std_504)
-    # "scenario3": 多因子策略 vs 单因子策略 (combo_2 vs market_cap)
-    
-    current_scenario = "scenario1"  # 修改这里来切换不同的对比场景
-    
-    # 获取配置
-    benchmark_name, benchmark_neutralize, strategy_name, strategy_neutralize = get_comparison_config(current_scenario)
-    
-    # 也可以手动覆盖配置（取消注释即可）：
-    # benchmark_name, benchmark_neutralize = "high_low_std_504", False
-    # strategy_name, strategy_neutralize = "high_low_std_504", True
-    
-    # =================================================================
-    
-    # 从配置文件获取因子信息
-    benchmark_config = get_factor_config(
-        benchmark_name, neutralize=benchmark_neutralize
-    )
-    strategy_config = get_factor_config(strategy_name, neutralize=strategy_neutralize)
-    benchmark_direction = benchmark_config["direction"]
-    strategy_direction = strategy_config["direction"]
-    
-    # 显示对比配置
-    print(f"\n=== 策略对比配置 ===")
-    print(f"基准策略: {benchmark_name} (中性化: {benchmark_neutralize}, 方向: {benchmark_direction})")
-    print(f"对比策略: {strategy_name} (中性化: {strategy_neutralize}, 方向: {strategy_direction})")
-    print(f"==================\n")
+    strategy_name = "combo3_turnover_rebalance_5_january_out"
+    strategy_neutralize = False
+    strategy_direction = "long"
+
 
     # 使用get_data_path生成文件路径
     benchmark_file = get_data_path(

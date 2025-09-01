@@ -111,7 +111,7 @@ def factor_factory(
     :param save_factor: 是否保存因子
     :return: 处理后的因子、IC报告、分层回测结果
     """
-    print(f"\n✅开始因子测试: {factor_name}_{index_item}_{direction}_{neutralize}✅")
+    print(f"\n🔴开始因子测试: {factor_name}_{index_item}_{direction}_{neutralize}🔴")
 
     # 1. 获取股票池 -> unstack
     print(f"✅获取股票池{index_item}_{start_date}_{end_date}...")
@@ -130,7 +130,7 @@ def factor_factory(
 
     # 3. 因子清洗
     print(
-        f"✅因子清洗{factor_name}_{index_item}_{direction}_{neutralize}_{universe_start}_{universe_end}..."
+        f"✅因子清洗{factor_name}_{index_item}_{direction}_{neutralize}_{universe_start}_{universe_end}"
     )
     processed_factor = preprocess_raw_factor(
         factor_name,
@@ -199,6 +199,11 @@ def get_factor_backtest(
     df_weight = buy_list.div(buy_list.sum(axis=1), axis=0)
     df_weight = df_weight.shift(1).dropna(how="all")
 
+    # 1月份空仓
+    # january_mask = df_weight.index.month == 1
+    # january_data = df_weight.loc[january_mask]
+    # df_weight.loc[january_mask] = january_data.where(january_data.isna(), 0)
+
     # 确定回测开始日期
     backtest_start_date = processed_factor.index[0].strftime("%F")
 
@@ -243,7 +248,7 @@ if __name__ == "__main__":
     layer_test = False
 
     # 当前要测试的因子
-    factor_name = "dp_ttm"
+    factor_name = "market_cap_3"
     neutralize = False
 
     # 从配置文件获取因子信息（简化版）
