@@ -7,7 +7,7 @@ from factor_utils import *
 from factor_utils.path_manager import get_data_path, load_processed_factors
 from alpha_local.core.factor_config import get_factor_config
 import pandas as pd
-from alpha_local.core.feval_single_factor_analysis import (
+from alpha_local.core.feval_single_factor_analytics import (
     get_stock_universe,
     get_factor_backtest,
 )
@@ -133,23 +133,26 @@ if __name__ == "__main__":
     market_cap_filtered = market_cap_3.where(bp_roe_groups)
     print_cap_stats(market_cap_filtered, "筛选后股票市值分布")
 
-    market_cap_mask = market_cap_3.rank(axis=1, ascending=False) <= 1000
-    market_cap_filtered = market_cap_filtered.where(market_cap_mask)
-    print_cap_stats(market_cap_filtered, "市值最小的前1000只股票市值分布")
+    # 方法1：直接使用市值范围筛选
+    market_cap_values = market_cap_3 * -1  # 转换为正值（因为market_cap_3是负数）
+    market_cap_mask = (market_cap_values >= 20e8) & (market_cap_values <= 100e8)
+    market_cap_filtered = market_cap_3.where(market_cap_mask)
+    print_cap_stats(market_cap_filtered, "市值范围筛选后的股票市值分布")
 
     turnover_filtered = turnover_std_20.where(market_cap_filtered.notna())
-    turnover_mask = turnover_std_20.rank(axis=1, ascending=False) <= 1000
+    turnover_mask = turnover_std_20.rank(axis=1, ascending=False) <= 500
     turnover_filtered = turnover_filtered.where(turnover_mask)
     print_cap_stats(turnover_filtered, "最终选股市值分布")
 
-    factor_name = "combo3_group_division"
+    processed_factor = turnover_filtered
+    factor_name = "combo3_group_division_market_cap_20_100"
     direction = "long"
     neutralize = False
     rebalance_days = 5
-    buy_rank = 50
+    buy_rank = 20
     # 因子回测
     get_factor_backtest(
-        processed_factor=market_cap_filtered,
+        processed_factor=processed_factor,
         factor_name=factor_name,
         index_item=index_item,
         direction=direction,

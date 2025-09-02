@@ -5,7 +5,7 @@ sys.path.insert(0, "/Users/didi/KDCJ")
 from factor_utils import *
 from factor_utils.path_manager import get_data_path
 import pandas as pd
-from alpha_local.core.factor_config import get_factor_config
+from alpha_local.core.factors import get_factor_config
 
 
 def get_stock_universe(start_date, end_date, index_item):
@@ -248,10 +248,10 @@ if __name__ == "__main__":
     layer_test = False
 
     # 当前要测试的因子
-    factor_name = "market_cap_3"
-    neutralize = False
+    factor_name = "op_q_yoy_mrq"
+    neutralize = True
 
-    # 从配置文件获取因子信息（简化版）
+    # 从配置文件获取因子信息
     config = get_factor_config(factor_name, neutralize=neutralize)
     factor_definition = config["definition"]
     direction = config["direction"]

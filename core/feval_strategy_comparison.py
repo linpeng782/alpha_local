@@ -18,7 +18,7 @@ from datetime import datetime
 sys.path.insert(0, "/Users/didi/KDCJ")
 from factor_utils.path_manager import get_data_path
 from alpha_local.core.factor_config import get_factor_config
-from alpha_local.core.feval_single_factor_analysis import get_stock_universe
+from alpha_local.core.feval_single_factor_analytics import get_stock_universe
 
 # 设置中文字体
 rcParams["font.sans-serif"] = ["SimHei", "Arial Unicode MS", "DejaVu Sans"]
@@ -464,7 +464,7 @@ def main():
     benchmark_neutralize = False
     benchmark_direction = "-1"
     
-    strategy_name = "combo3_group_division"
+    strategy_name = "combo3_group_division_market_cap_20_100"
     strategy_neutralize = False
     strategy_direction = "long"
 
