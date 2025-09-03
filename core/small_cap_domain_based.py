@@ -5,7 +5,6 @@ import pickle
 sys.path.insert(0, "/Users/didi/KDCJ")
 from factor_utils import *
 from factor_utils.path_manager import get_data_path, load_processed_factors
-from alpha_local.core.factor_config import get_factor_config
 import pandas as pd
 from alpha_local.core.feval_single_factor_analytics import (
     get_stock_universe,
